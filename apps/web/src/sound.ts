@@ -123,6 +123,49 @@ export const sfx = {
       noise(c, t + dt, 0.09, 400, 0.6, 0.3);
     }
   },
+  /** 太鼓の大きな一打（場札が燃える瞬間） */
+  don(delaySec = 0) {
+    const c = ready();
+    if (!c) return;
+    const t = at(c, delaySec);
+    tone(c, t, 95, 0.9, 1, 'sine', 40);
+    tone(c, t, 190, 0.3, 0.25, 'triangle', 90);
+    noise(c, t, 0.14, 300, 0.5, 0.4);
+  },
+  /** 太鼓の連打（ルーレットの間。だんだん速く、強くなる） */
+  drumroll(durSec: number, delaySec = 0) {
+    const c = ready();
+    if (!c) return;
+    const t0 = at(c, delaySec);
+    let t = 0;
+    let gap = 0.26;
+    while (t < durSec) {
+      const k = t / durSec;
+      tone(c, t0 + t, 120 - 20 * k, 0.28, 0.25 + 0.45 * k, 'sine', 55);
+      noise(c, t0 + t, 0.05, 500, 0.6, 0.06 + 0.1 * k);
+      t += gap;
+      gap = Math.max(0.065, gap * 0.93);
+    }
+  },
+  /** 太鼓の軽い一打（ルーレットが回っている間の拍） */
+  beat(delaySec = 0) {
+    const c = ready();
+    if (!c) return;
+    const t = at(c, delaySec);
+    tone(c, t, 105, 0.3, 0.45, 'sine', 55);
+    noise(c, t, 0.05, 500, 0.6, 0.1);
+  },
+  /** 拍子木（新しい札が出たとき） */
+  kan(delaySec = 0) {
+    const c = ready();
+    if (!c) return;
+    const t = at(c, delaySec);
+    for (const dt of [0, 0.16]) {
+      tone(c, t + dt, 1900, 0.09, 0.4, 'triangle');
+      tone(c, t + dt, 2850, 0.05, 0.15, 'sine');
+      noise(c, t + dt, 0.03, 3500, 1.5, 0.3);
+    }
+  },
   /** 入れ替えのルーレットが 1 つ進む（拍子木） */
   tick(delaySec = 0) {
     const c = ready();

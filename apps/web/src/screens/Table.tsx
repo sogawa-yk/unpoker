@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { DEFAULT_CONFIG, handName, type Card as CardT, type GameView, type SeatView } from '@unpoker/core';
 import { Card } from '../components/Card.tsx';
 import { Chips, ConnBadge, Gauge, signed, Toast } from '../components/bits.tsx';
-import { provisionalRank, revealOdds, type HandOdds } from '../game.ts';
+import { provisionalRank, revealOdds, rouletteSchedule, ROULETTE_SPIN_MS, type HandOdds } from '../game.ts';
 import { useRoom, type Room, type RoomView } from '../net.ts';
 import { setSoundOn, sfx, soundOn } from '../sound.ts';
 import './table.css';
@@ -272,7 +272,7 @@ function TableGame({ room, s, g }: { room: Room; s: RoomView; g: GameView }) {
     return g.seats.map((x) => revealOdds(x, g.board, visible));
   }, [visibleKey]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
-    <div className="game">
+    <div className={`game${g.phase === 'swap' && !swapDone.intro && !swapDone.revealNew ? ' swapping' : ''}`}>
       <header className="game-head">
         <span>
           {s.gameNo} ゲーム目{s.config.maxGames ? ` ／ ${s.config.maxGames}` : ''}
@@ -318,6 +318,8 @@ function TableGame({ room, s, g }: { room: Room; s: RoomView; g: GameView }) {
         </div>
       </div>
       <NutOverlay g={g} />
+      <ChallengeBanner g={g} s={s} names={names} />
+      <ChallengeIntro g={g} names={names} show={g.phase === 'swap' && swapDone.intro} />
       <BetAnnounce s={s} g={g} names={names} />
     </div>
   );
@@ -372,7 +374,6 @@ function useTableSounds(s: RoomView, g: GameView) {
     }
     if (cur.revealed > p.revealed) sfx.flip();
     if (cur.declarers > p.declarers) sfx.challenge();
-    if (cur.joiners > p.joiners) sfx.stamp();
   });
 }
 
@@ -470,9 +471,12 @@ function Banner({ g, names }: { g: GameView; names: string[] }) {
     case 'join':
       text = '便乗するか考えています';
       break;
-    case 'swap':
-      text = '場札を 1 枚入れ替えます';
+    case 'swap': {
+      const r = g.challenge?.roulette;
+      const who = names[g.challenge?.roller ?? -1] ?? '';
+      text = r === 'ready' ? `${who} がルーレットを回します` : r === 'spinning' ? `${who} がストップを押します` : '場札を 1 枚入れ替えます';
       break;
+    }
     case 'result':
       text = `${listNames(g.result!.winners)} の勝ち`;
       break;
@@ -548,60 +552,173 @@ function Board({ g, swap }: { g: GameView; swap: SwapAnim }) {
 }
 
 interface SwapAnim {
+  /** 勝負の顔ぶれを発表している（ルーレットの前） */
+  intro: boolean;
   highlight: number | null;
   burning: boolean;
   done: boolean;
   revealNew: boolean;
 }
 
-/** 入れ替えの演出: 光がルーレットのように回って止まる → 札が燃えて消える → 新しい札をめくる（約 5 秒） */
+/** 勝負の顔ぶれを発表する長さ（ミリ秒）。この間は宣言した人が「回す」を押しても、光は発表の後から回り始める */
+export const SWAP_INTRO_MS = 2800;
+
+/**
+ * 入れ替えの演出（山場 2）。ルーレットは、チャレンジを宣言した人がスマホで回して止める
+ *   顔ぶれの発表（挑戦・受けて立つ・便乗を順に押印）
+ *   → 回すのを待つ → 回っている間は光が一定の速さで回り続ける（拍子木と太鼓の拍）
+ *   → ストップで、今の位置からだんだん遅くなって入れ替える札で止まる（太鼓の連打）
+ *   → 太鼓の一打で札が燃えて消える → 拍子木で新しい札をめくる
+ * どの札を入れ替えるかは、ストップを押したときにサーバーがランダムに決める（押す時機で結果は変わらない）
+ */
 function useSwapAnimation(g: GameView, gameNo: number): SwapAnim {
-  const target = g.challenge?.swap?.index ?? null;
-  const [st, setSt] = useState<SwapAnim>({ highlight: null, burning: false, done: false, revealNew: false });
-  const key = `${gameNo}:${target}`;
-  const started = useRef<string | null>(null);
+  const ch = g.challenge;
+  const target = ch?.swap?.index ?? null;
+  const roulette = ch ? (ch.roulette ?? (ch.swap ? 'stopped' : 'ready')) : null;
+  const idle: SwapAnim = { intro: false, highlight: null, burning: false, done: false, revealNew: false };
+  const [st, setSt] = useState<SwapAnim>(idle);
+  const pos = useRef(-1); // 今光っている位置
+  const introFor = useRef<number | null>(null);
+  const finishFor = useRef<number | null>(null);
+
+  // 顔ぶれの発表: 入れ替えの場面に入った最初だけ
+  useEffect(() => {
+    if (g.phase !== 'swap' || roulette === 'stopped' || introFor.current === gameNo) return;
+    introFor.current = gameNo;
+    pos.current = -1;
+    setSt({ ...idle, intro: true });
+    const t = setTimeout(() => setSt((p) => ({ ...p, intro: false })), SWAP_INTRO_MS);
+    return () => clearTimeout(t);
+  }, [g.phase, gameNo, roulette]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 回っている間: 一定の速さで回り続ける
+  useEffect(() => {
+    if (g.phase !== 'swap' || roulette !== 'spinning' || st.intro) return;
+    const iv = setInterval(() => {
+      pos.current = (pos.current + 1) % 5;
+      const p = pos.current;
+      setSt((s) => ({ ...s, highlight: p }));
+      sfx.tick();
+      if (p === 0) sfx.beat();
+    }, ROULETTE_SPIN_MS);
+    return () => clearInterval(iv);
+  }, [g.phase, roulette, st.intro]);
+
+  // 止めたら: 今の位置から減速して target で止まり、燃えて、新しい札をめくる
   useEffect(() => {
     if (target === null) {
-      setSt({ highlight: null, burning: false, done: false, revealNew: false });
+      if (g.phase !== 'swap') setSt(idle);
       return;
     }
     if (g.phase !== 'swap') {
       // 途中から開いた場合や結果の画面は、入れ替え後の状態で見せる
-      if (started.current !== key) setSt({ highlight: null, burning: false, done: true, revealNew: true });
+      if (finishFor.current !== gameNo) setSt({ ...idle, done: true, revealNew: true });
       return;
     }
-    if (started.current === key) return;
-    started.current = key;
+    if (st.intro || finishFor.current === gameNo) return;
+    finishFor.current = gameNo;
     const timers: ReturnType<typeof setTimeout>[] = [];
-    // 減速しながら回り、target で止まる
-    const steps = 18 + target;
-    let t = 0;
-    for (let i = 0; i <= steps; i++) {
-      t += 60 + (i / steps) ** 2.2 * 260;
-      const idx = i % 5;
-      timers.push(
-        setTimeout(() => {
-          setSt((p) => ({ ...p, highlight: idx }));
-          sfx.tick();
-        }, t),
-      );
-    }
-    timers.push(
-      setTimeout(() => {
-        setSt((p) => ({ ...p, burning: true }));
-        sfx.swap();
-      }, t + 500),
-    );
-    timers.push(setTimeout(() => setSt({ highlight: null, burning: false, done: true, revealNew: false }), t + 1250));
-    timers.push(
-      setTimeout(() => {
-        setSt((p) => ({ ...p, revealNew: true }));
-        sfx.flip();
-      }, t + 1450),
-    );
-    return () => timers.forEach(clearTimeout);
-  }, [key, g.phase, target]);
+    const at = (ms: number, f: () => void) => timers.push(setTimeout(f, ms));
+    const ticks = rouletteSchedule(target, 5, 2, pos.current, ROULETTE_SPIN_MS);
+    const end = ticks[ticks.length - 1]!.at;
+    sfx.drumroll(end / 1000);
+    for (const tk of ticks)
+      at(tk.at, () => {
+        pos.current = tk.index;
+        setSt((p) => ({ ...p, highlight: tk.index }));
+        sfx.tick();
+      });
+    at(end + 500, () => {
+      setSt((p) => ({ ...p, burning: true }));
+      sfx.don();
+      sfx.swap(0.05);
+    });
+    at(end + 1250, () => setSt({ ...idle, done: true }));
+    at(end + 1450, () => {
+      setSt((p) => ({ ...p, revealNew: true }));
+      sfx.flip();
+      sfx.kan(0.15);
+    });
+    return () => {
+      timers.forEach(clearTimeout);
+      finishFor.current = null; // 途中で外れたら、次に描くときにやり直す
+    };
+  }, [target, g.phase, gameNo, st.intro]); // eslint-disable-line react-hooks/exhaustive-deps
   return st;
+}
+
+/** 宣言の瞬間（便乗を待つ間）: 「挑戦」の印を大きく押す */
+function ChallengeBanner({ g, s, names }: { g: GameView; s: RoomView; names: string[] }) {
+  const [shown, setShown] = useState(false);
+  const seen = useRef<number | null>(null);
+  useEffect(() => {
+    if (g.phase !== 'join' || !g.challenge || seen.current === s.gameNo) return;
+    seen.current = s.gameNo;
+    setShown(true);
+    const t = setTimeout(() => setShown(false), 2600);
+    return () => clearTimeout(t);
+  }, [g.phase, s.gameNo]); // eslint-disable-line react-hooks/exhaustive-deps
+  const ch = g.challenge;
+  return (
+    <AnimatePresence>
+      {shown && ch && (
+        <motion.div className="ch-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+          <motion.span
+            className="seal ch-seal"
+            initial={{ scale: 2.6, rotate: -18, opacity: 0 }}
+            animate={{ scale: 1, rotate: -6, opacity: 1 }}
+            transition={{ type: 'spring', stiffness: 300, damping: 14 }}
+          >
+            挑戦
+          </motion.span>
+          <motion.p initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0, transition: { delay: 0.5 } }}>
+            {ch.declarers.map((i) => names[i]).join('・')} が {ch.forced.map((i) => names[i]).join('・')} に勝負を挑みました
+          </motion.p>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
+/** 入れ替えの前: 勝負の顔ぶれを 1 人ずつ押印して見せる */
+function ChallengeIntro({ g, names, show }: { g: GameView; names: string[]; show: boolean }) {
+  const ch = g.challenge;
+  const rows = ch
+    ? [
+        ...ch.declarers.map((i) => ({ i, tag: '挑戦' })),
+        ...ch.forced.map((i) => ({ i, tag: '受けて立つ' })),
+        ...ch.joiners.map((i) => ({ i, tag: '便乗' })),
+      ]
+    : [];
+  const step = Math.min(0.55, 2.0 / Math.max(1, rows.length));
+  useEffect(() => {
+    if (!show) return;
+    rows.forEach((_, k) => sfx.stamp(0.25 + k * step));
+  }, [show]); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <AnimatePresence>
+      {show && (
+        <motion.div className="ch-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.4 } }}>
+          <p className="ch-title">勝負の顔ぶれ</p>
+          <div className="ch-rows">
+            {rows.map((r, k) => (
+              <motion.div
+                key={`${r.tag}-${r.i}`}
+                className="ch-row"
+                initial={{ opacity: 0, scale: 1.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ delay: 0.25 + k * step, type: 'spring', stiffness: 380, damping: 18 }}
+              >
+                <span className={`seal${r.tag === '挑戦' ? '' : r.tag === '受けて立つ' ? ' kin' : ' ai'}`}>{r.tag}</span>
+                <span className="ch-name">{names[r.i]}</span>
+              </motion.div>
+            ))}
+          </div>
+          <p className="ch-sub">場札が 1 枚、ランダムに入れ替わります</p>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
 }
 
 const SEAT_CARD = 58;

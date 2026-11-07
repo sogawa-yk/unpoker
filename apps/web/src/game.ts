@@ -93,3 +93,24 @@ export function revealOdds(seat: SeatView, board: (Card | null)[], visible: Set<
     .sort((a, b) => b.category - a.category);
   return { current: cur, chances, settled: false };
 }
+
+/**
+ * 場札入れ替えのルーレット（減速して止まるまで）: 光が場札を 1 枚ずつ進み、だんだん遅くなって target で止まる。
+ * start は今光っている位置（まだ光っていなければ -1）。返り値は光を動かす時刻（ミリ秒、減速の開始から）と、そのとき光る位置。
+ * 最後の位置は必ず target
+ */
+export function rouletteSchedule(target: number, slots = 5, laps = 2, start = -1, base = 85): { at: number; index: number }[] {
+  // 少なくとも laps 周してから target で止まるよう、進む歩数を決める
+  const mod = (x: number) => ((x % slots) + slots) % slots;
+  const n = laps * slots + mod(target - start - 1) + 1;
+  const out: { at: number; index: number }[] = [];
+  let t = 0;
+  for (let i = 0; i < n; i++) {
+    t += base + (i / (n - 1)) ** 2.4 * 420;
+    out.push({ at: t, index: mod(start + 1 + i) });
+  }
+  return out;
+}
+
+/** ルーレットが回り続けている間、光が 1 枚進む間隔（ミリ秒） */
+export const ROULETTE_SPIN_MS = 85;

@@ -275,7 +275,8 @@ function MyGauge({ room, g }: { room: Room; g: GameView }) {
     (g.phase === 'placement' && !g.seats[g.you!]!.arranged) ||
     (g.phase === 'reveal' && g.revealTurn === g.you) ||
     (g.phase === 'declare' && g.provisional?.lasts.includes(g.you!) && !g.seats[g.you!]!.declareDone) ||
-    (g.phase === 'join' && g.challenge?.optional.includes(g.you!) && !g.seats[g.you!]!.joinDone);
+    (g.phase === 'join' && g.challenge?.optional.includes(g.you!) && !g.seats[g.you!]!.joinDone) ||
+    (g.phase === 'swap' && g.challenge?.roller === g.you && g.challenge.roulette !== 'stopped');
   return <div className="pg-gauge">{mine ? <Gauge room={room} /> : <div className="gauge" style={{ visibility: 'hidden' }} />}</div>;
 }
 
@@ -566,6 +567,9 @@ function AfterPlacement({ g, me, act, name }: { g: GameView; me: SeatView; act: 
               advice={<AdvicePanel g={g} me={me} act={act} name={name} />}
             />
           )}
+          {g.phase === 'swap' && g.challenge?.roller === you && (g.challenge.roulette === 'ready' || g.challenge.roulette === 'spinning') && (
+            <RouletteControl spinning={g.challenge.roulette === 'spinning'} onPress={(cmd) => act({ type: 'roulette', cmd })} />
+          )}
           {g.phase === 'join' && optMe && !me.joinDone && (
             <Decision
               title="チャレンジに乗りますか？"
@@ -613,11 +617,39 @@ function waitingNote(g: GameView, you: number, name: (i: number) => string): str
       return prov.lasts.includes(you) && g.seats[you]!.declareDone ? '決めました。結果を待っています' : prov.lasts.includes(you) ? '' : `${lasts} がチャレンジを考えています`;
     case 'join':
       return g.challenge!.optional.includes(you) && !g.seats[you]!.joinDone ? '' : '便乗する人を待っています';
-    case 'swap':
+    case 'swap': {
+      const ch = g.challenge!;
+      if (ch.roller === you && (ch.roulette === 'ready' || ch.roulette === 'spinning')) return '';
+      if (ch.roulette === 'ready') return `${name(ch.roller!)} がルーレットを回します`;
+      if (ch.roulette === 'spinning') return `${name(ch.roller!)} がストップを押します`;
       return 'テーブルで場札を入れ替えています';
+    }
     default:
       return '';
   }
+}
+
+/** チャレンジを宣言した人のスマホ: 場札入れ替えのルーレットを回して、止める */
+function RouletteControl({ spinning, onPress }: { spinning: boolean; onPress: (cmd: 'start' | 'stop') => void }) {
+  return (
+    <motion.section className="decision roulette-ctl" initial={{ y: 30, opacity: 0 }} animate={{ y: 0, opacity: 1 }}>
+      <h2 className="decision-title">{spinning ? 'いつでも止められます' : 'ルーレットを回してください'}</h2>
+      <p className="decision-body">
+        {spinning ? 'iPad の場札の上を光が回っています。ストップを押すと、だんだん遅くなって 1 枚で止まり、その札が入れ替わります' : '場札 5 枚のどれか 1 枚が入れ替わります。どの札になるかは運次第です'}
+      </p>
+      <motion.button
+        key={spinning ? 'stop' : 'start'}
+        type="button"
+        className={`roulette-btn${spinning ? ' stop' : ''}`}
+        initial={{ scale: 0.8 }}
+        animate={{ scale: 1 }}
+        whileTap={{ scale: 0.92 }}
+        onClick={() => onPress(spinning ? 'stop' : 'start')}
+      >
+        {spinning ? 'ストップ' : '回す'}
+      </motion.button>
+    </motion.section>
+  );
 }
 
 function Decision(props: { title: string; body: string; yes: string; onYes: () => void; onNo: () => void; disabledYes?: boolean; advice?: React.ReactNode }) {
@@ -731,6 +763,10 @@ function useBot(room: Room, on: boolean) {
       a = { type: 'declare', yes: me.stack > 0 && Math.random() < 0.6 };
     } else if (g.phase === 'join' && g.challenge?.optional.includes(g.you) && !me.joinDone) {
       a = { type: 'join', yes: Math.random() < 0.4 };
+    } else if (g.phase === 'swap' && g.challenge?.roller === g.you && g.challenge.roulette !== 'stopped') {
+      const cmd = g.challenge.roulette === 'ready' ? 'start' : 'stop';
+      const t = setTimeout(() => room.send({ t: 'action', action: { type: 'roulette', cmd } }), cmd === 'start' ? 3500 : 2500);
+      return () => clearTimeout(t);
     }
     if (!a) return;
     const action = a;

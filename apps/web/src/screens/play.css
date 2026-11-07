@@ -574,3 +574,49 @@
     animation: none;
   }
 }
+
+/* ---- ルーレットの操作（宣言した人） ---- */
+.roulette-ctl {
+  justify-items: center;
+  text-align: center;
+}
+.roulette-btn {
+  width: 168px;
+  height: 168px;
+  margin: 8px 0 4px;
+  border-radius: 50%;
+  border: 0;
+  font-family: var(--mincho);
+  font-size: 34px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--sumi);
+  background: radial-gradient(circle at 35% 30%, #fff8e6, var(--kinari) 60%, #d8ccb0);
+  box-shadow:
+    0 0 0 4px var(--kin),
+    0 0 0 9px rgb(201 162 74 / 0.25),
+    0 10px 24px rgb(0 0 0 / 0.45);
+  touch-action: manipulation;
+}
+.roulette-btn.stop {
+  color: #fff;
+  background: radial-gradient(circle at 35% 30%, #f07a5e, var(--shu) 60%, #8f2a17);
+  box-shadow:
+    0 0 0 4px #f6e7b6,
+    0 0 0 10px rgb(207 66 39 / 0.3),
+    0 10px 24px rgb(0 0 0 / 0.45);
+  animation: stop-pulse 0.9s ease-in-out infinite;
+}
+@keyframes stop-pulse {
+  50% {
+    box-shadow:
+      0 0 0 4px #f6e7b6,
+      0 0 0 18px rgb(207 66 39 / 0.12),
+      0 10px 24px rgb(0 0 0 / 0.45);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .roulette-btn.stop {
+    animation: none;
+  }
+}
