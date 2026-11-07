@@ -8,6 +8,9 @@ import { arrangeSets, chooseBoardIndex } from './strategy.ts';
 export const HAND_SIZE = 7;
 export const FREE_PEEKS = 3;
 
+/** 追加でめくる 1 枚の料金（rules.md B-5: 0.25B。端数は切り上げ） */
+export const peekPriceFor = (bet: number) => Math.ceil(bet / 4);
+
 export type Phase =
   | 'placement' // 3 枚めくる → 1 枚を場に出す → 3 セットを作る（全員同時）
   | 'boardReveal' // 場札 5 枚の公開演出
@@ -24,6 +27,8 @@ export interface SeatState {
   stack: number;
   baseBet: number;
   challengeFee: number;
+  /** 追加でめくった料金の合計（次のゲームの持ち越しポットに入る） */
+  peekFee: number;
   hand: Card[];
   /** めくった札の位置（めくった順） */
   peeked: number[];
@@ -69,6 +74,8 @@ export interface GameResult {
   nutPayout: number[];
   nutPaid: number[];
   carryPayout: number[];
+  /** 次のゲームへ持ち越す額（このゲームの追加めくりの料金の合計） */
+  carryOut: number;
 }
 
 export interface GameState {
@@ -84,8 +91,12 @@ export interface GameState {
   provisional: Provisional | null;
   challenge: ChallengeState | null;
   result: GameResult | null;
-  /** 前のゲームからの持ち越しポット（2 段階目の有料機能で使う） */
+  /** 前のゲームからの持ち越しポット。このゲームの最終勝者が受け取る */
   carryIn: number;
+  /** 追加でめくる 1 枚の料金 */
+  peekPrice: number;
+  /** 追加でめくれるか（規定数の最終ゲームでは、受け取る次のゲームがないのでめくれない） */
+  extraPeeks: boolean;
 }
 
 export type GameAction =
@@ -111,9 +122,11 @@ export interface NewGameInput {
   bet: number;
   dealer: number;
   carryIn?: number;
+  /** 追加でめくれるか（既定は true） */
+  extraPeeks?: boolean;
 }
 
-export function newGame({ players, bet, dealer, carryIn = 0 }: NewGameInput, rng: Rng): GameState {
+export function newGame({ players, bet, dealer, carryIn = 0, extraPeeks = true }: NewGameInput, rng: Rng): GameState {
   const n = players.length;
   if (n < 3 || n > 4) fail('参加人数は 3 人か 4 人');
   if (players.some((p) => p.chips <= 0)) fail('持ち点が 0 の参加者はゲームに入れない');
@@ -125,6 +138,7 @@ export function newGame({ players, bet, dealer, carryIn = 0 }: NewGameInput, rng
       stack: p.chips - base,
       baseBet: base,
       challengeFee: 0,
+      peekFee: 0,
       hand: deck.splice(0, HAND_SIZE),
       peeked: [],
       boardIndex: null,
@@ -148,6 +162,8 @@ export function newGame({ players, bet, dealer, carryIn = 0 }: NewGameInput, rng
     challenge: null,
     result: null,
     carryIn,
+    peekPrice: peekPriceFor(bet),
+    extraPeeks,
   };
 }
 
@@ -172,9 +188,15 @@ export function apply(state: GameState, action: GameAction, rng: Rng): GameState
       if (s.phase !== 'placement') fail('配置フェーズではない');
       const p = seatOf(s, action.seat);
       if (p.boardIndex !== null) fail('場に札を出した後はめくれない');
-      if (p.peeked.length >= FREE_PEEKS) fail(`めくれるのは ${FREE_PEEKS} 枚まで`);
       if (!Number.isInteger(action.index) || action.index < 0 || action.index >= HAND_SIZE) fail('位置が不正');
       if (p.peeked.includes(action.index)) fail('すでにめくった札');
+      if (p.peeked.length >= FREE_PEEKS) {
+        // 4 枚目からは有料（B-5）。料金は次のゲームの持ち越しポットへ
+        if (!s.extraPeeks) fail('このゲームでは追加でめくれない');
+        if (p.stack < s.peekPrice) fail('持ち点が足りないので追加でめくれない');
+        p.stack -= s.peekPrice;
+        p.peekFee += s.peekPrice;
+      }
       p.peeked.push(action.index);
       return s;
     }
@@ -371,7 +393,7 @@ function finish(s: GameState): GameState {
     });
     for (let i = 0; i < n; i++) stacks[i]! += nutPayout[i]! - nutPaid[i]!;
   }
-  const before = s.seats.map((p) => p.stack + p.baseBet + p.challengeFee);
+  const before = s.seats.map((p) => p.stack + p.baseBet + p.challengeFee + (p.peekFee ?? 0));
   s.result = {
     board: [...s.board],
     scores,
@@ -385,6 +407,7 @@ function finish(s: GameState): GameState {
     nutPayout,
     nutPaid,
     carryPayout,
+    carryOut: s.seats.reduce((a, p) => a + (p.peekFee ?? 0), 0),
   };
   s.phase = 'result';
   return s;

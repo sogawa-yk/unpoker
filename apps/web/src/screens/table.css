@@ -163,6 +163,13 @@
 .game-head > span {
   align-self: center;
 }
+/* 持ち越しポット（勝者が基本ベットと一緒に受け取る）と、次へ回る分 */
+.carry {
+  color: var(--kin-hi);
+}
+.carry.next {
+  color: var(--hakuai);
+}
 /* 持ち時間の一時停止（テーブルだけが操作できる） */
 .pause-btn {
   font: inherit;

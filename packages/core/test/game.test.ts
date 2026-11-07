@@ -112,7 +112,7 @@ describe('ゲーム進行', () => {
     let g = newGame({ players: [1, 2, 3].map((i) => ({ id: `p${i}`, chips: 1000 })), bet: 100, dealer: 0 }, rng);
     expect(() => apply(g, { type: 'place', seat: 0, index: 0 }, rng)).toThrow('先に 3 枚めくる');
     g = run(g, [0, 1, 2].map((k) => ({ type: 'peek', seat: 0, index: k }) as GameAction), rng);
-    expect(() => apply(g, { type: 'peek', seat: 0, index: 3 }, rng)).toThrow('3 枚まで');
+    expect(() => apply(g, { type: 'peek', seat: 0, index: 1 }, rng)).toThrow('すでにめくった');
     expect(() => apply(g, { type: 'place', seat: 0, index: 5 }, rng)).toThrow('めくった札の中から');
     g = apply(g, { type: 'place', seat: 0, index: 1 }, rng);
     expect(() => apply(g, { type: 'arrange', seat: 0, sets: [[1, 2], [3, 4], [5, 6]] }, rng)).toThrow('ちょうど 1 回ずつ');
@@ -151,13 +151,17 @@ function playMatch(seed: number, n: number) {
     }
     checkViews(g);
     const r = g.result!;
-    expect(r.delta.reduce((a, b) => a + b, 0)).toBe(g.carryIn);
+    expect(r.delta.reduce((a, b) => a + b, 0)).toBe(g.carryIn - r.carryOut);
     expect(r.stacks.every((x) => x >= 0)).toBe(true);
     m = settleGame({ ...m, game: g });
-    expect(m.players.reduce((a, p) => a + p.chips, 0)).toBe(total);
+    // 持ち点と持ち越しポットの合計は変わらない
+    expect(m.players.reduce((a, p) => a + p.chips, 0) + (m.carry?.amount ?? 0)).toBe(total);
     games++;
   }
   expect(m.ranking).toHaveLength(n);
+  // 終わったら持ち越しポットは払い戻されている
+  expect(m.carry?.amount ?? 0).toBe(0);
+  expect(m.players.reduce((a, p) => a + p.chips, 0)).toBe(total);
   return games;
 }
 
@@ -167,6 +171,9 @@ function randomAction(g: GameState, seat: number, rng: Rng): GameAction {
   switch (g.phase) {
     case 'placement': {
       if (p.peeked.length < 3) return { type: 'peek', seat, index: pick([...Array(HAND_SIZE).keys()].filter((k) => !p.peeked.includes(k))) };
+      const rest = [...Array(HAND_SIZE).keys()].filter((k) => !p.peeked.includes(k));
+      if (p.boardIndex === null && g.extraPeeks && p.stack >= g.peekPrice && rest.length > 0 && rng() < 0.3)
+        return { type: 'peek', seat, index: pick(rest) };
       if (p.boardIndex === null) return { type: 'place', seat, index: pick(p.peeked) };
       const idx = [...Array(HAND_SIZE).keys()].filter((k) => k !== p.boardIndex);
       for (let i = idx.length - 1; i > 0; i--) {
@@ -219,5 +226,71 @@ describe('ランダム対局（不変条件）', () => {
       games += playMatch(1000 + seed, 4);
     }
     expect(games).toBeGreaterThan(200);
+  });
+});
+
+describe('追加でめくる（有料）と持ち越しポット', () => {
+  it('4 枚目から 1 枚ごとに 0.25B を払い、持ち点が足りなければめくれない', () => {
+    const rng = seededRng(5);
+    let g = newGame({ players: [0, 1, 2].map((i) => ({ id: `p${i}`, chips: i === 2 ? 130 : 1000 })), bet: 100, dealer: 0 }, rng);
+    expect(g.peekPrice).toBe(25);
+    g = run(g, [0, 1, 2, 3, 4].map((k) => ({ type: 'peek', seat: 0, index: k }) as GameAction), rng);
+    expect(g.seats[0]!.stack).toBe(900 - 50);
+    expect(g.seats[0]!.peekFee).toBe(50);
+    // 席 2 は基本ベット 100 を出して残り 30: 1 枚だけ追加できる
+    g = run(g, [0, 1, 2, 3].map((k) => ({ type: 'peek', seat: 2, index: k }) as GameAction), rng);
+    expect(g.seats[2]!.stack).toBe(5);
+    expect(() => apply(g, { type: 'peek', seat: 2, index: 4 }, rng)).toThrow('持ち点が足りない');
+    // 場に出した後はめくれない
+    g = apply(g, { type: 'place', seat: 0, index: 4 }, rng);
+    expect(() => apply(g, { type: 'peek', seat: 0, index: 5 }, rng)).toThrow('場に札を出した後');
+    // 他の人には枚数と料金だけ見え、中身は見えない
+    const tv = viewFor(g, { kind: 'table' });
+    expect(tv.seats[0]!.peekedCount).toBe(5);
+    expect(tv.seats[0]!.peekFee).toBe(50);
+    expect(tv.seats[0]!.cards.every((c) => c === null)).toBe(true);
+  });
+
+  it('料金は次のゲームの勝者が受け取り、最終ゲームでは追加でめくれない', () => {
+    const rng = seededRng(9);
+    let m = createMatch({ initialChips: 1000, bet: 100, maxGames: 2 }, [0, 1, 2].map((i) => ({ id: `p${i}`, name: `P${i}` })));
+    m = startGame(m, rng);
+    let g = m.game!;
+    expect(g.extraPeeks).toBe(true);
+    g = run(g, [0, 1, 2, 3].map((k) => ({ type: 'peek', seat: 1, index: k }) as GameAction), rng);
+    while (g.phase !== 'result') g = apply(g, pendingSeats(g).length ? { type: 'timeout' } : { type: 'advance' }, rng);
+    expect(g.result!.carryOut).toBe(25);
+    m = settleGame({ ...m, game: g });
+    expect(m.carry).toEqual({ amount: 25, from: { [m.seatIds[1]!]: 25 } });
+    m = startGame(m, rng);
+    g = m.game!;
+    expect(g.carryIn).toBe(25);
+    expect(g.extraPeeks).toBe(false);
+    g = run(g, [0, 1, 2].map((k) => ({ type: 'peek', seat: 0, index: k }) as GameAction), rng);
+    expect(() => apply(g, { type: 'peek', seat: 0, index: 3 }, rng)).toThrow('追加でめくれない');
+    while (g.phase !== 'result') g = apply(g, pendingSeats(g).length ? { type: 'timeout' } : { type: 'advance' }, rng);
+    const r = g.result!;
+    expect(r.carryPayout.reduce((a, b) => a + b, 0)).toBe(25);
+    for (const w of r.winners) expect(r.carryPayout[w]!).toBeGreaterThan(0);
+    m = settleGame({ ...m, game: g });
+    expect(m.finished).toBe(true);
+    expect(m.players.reduce((a, p) => a + p.chips, 0)).toBe(3000);
+  });
+
+  it('対局が途中で終わったら、残った持ち越しポットは払った人へ返す', () => {
+    const rng = seededRng(11);
+    let m = createMatch({ initialChips: 1000, bet: 100, maxGames: null }, [0, 1, 2].map((i) => ({ id: `p${i}`, name: `P${i}` })));
+    m = startGame(m, rng);
+    let g = m.game!;
+    g = run(g, [0, 1, 2, 3, 4].map((k) => ({ type: 'peek', seat: 0, index: k }) as GameAction), rng);
+    while (g.phase !== 'result') g = apply(g, pendingSeats(g).length ? { type: 'timeout' } : { type: 'advance' }, rng);
+    // 1 人を脱落させて、残り 2 人で対局を終わらせる
+    const r = g.result!;
+    const loser = [0, 1, 2].find((i) => i !== 0 && !r.winners.includes(i)) ?? [0, 1, 2].find((i) => !r.winners.includes(i))!;
+    r.stacks[loser] = 0;
+    m = settleGame({ ...m, game: g });
+    expect(m.finished).toBe(true);
+    expect(m.refund).toEqual({ [m.seatIds[0]!]: 50 });
+    expect(m.carry!.amount).toBe(0);
   });
 });

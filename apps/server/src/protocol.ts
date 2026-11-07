@@ -75,6 +75,8 @@ export interface RoomView {
   deadlineMs: number;
   /** 締め切りが持ち時間（操作待ち）なら true、演出の待ち時間なら false */
   deadlineIsTimeout: boolean;
+  /** 対局の終了時に払い戻した持ち越しポット（プレイヤー ID → 額） */
+  refund: Record<string, number> | null;
   /** テーブルが持ち時間を止めている */
   paused: boolean;
   /** 止めている間の操作待ちの残り（ミリ秒）。操作待ちでなければ null */
