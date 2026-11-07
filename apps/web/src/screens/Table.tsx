@@ -7,6 +7,7 @@ import { Card } from '../components/Card.tsx';
 import { Chips, ConnBadge, Gauge, signed, Toast } from '../components/bits.tsx';
 import { provisionalRank, revealOdds, type HandOdds } from '../game.ts';
 import { useRoom, type Room, type RoomView } from '../net.ts';
+import { setSoundOn, sfx, soundOn } from '../sound.ts';
 import './table.css';
 
 export function TableScreen({ roomId, navigate }: { roomId: string | null; navigate: (path: string, replace?: boolean) => void }) {
@@ -242,6 +243,7 @@ function TableGame({ room, s, g }: { room: Room; s: RoomView; g: GameView }) {
   const sides = SIDES[g.seats.length] ?? SIDES[4]!;
   const swapDone = useSwapAnimation(g, s.gameNo);
   const nextCarry = g.seats.reduce((a, x) => a + x.peekFee, 0);
+  useTableSounds(s, g);
   // 公開フェーズの見込み: テーブルに見えている札（場札とめくれた札）だけから計算する
   const visibleKey = g.phase === 'reveal' ? JSON.stringify([g.board, g.seats.map((x) => x.cards)]) : '';
   const odds = useMemo(() => {
@@ -271,6 +273,7 @@ function TableGame({ room, s, g }: { room: Room; s: RoomView; g: GameView }) {
           </span>
         )}
         {g.phase !== 'result' && <PauseButton room={room} s={s} />}
+        <SoundButton />
       </header>
       <div className="arena">
         {g.seats.map((sv, i) => (
@@ -302,6 +305,57 @@ function TableGame({ room, s, g }: { room: Room; s: RoomView; g: GameView }) {
 
 const rotatingBet = (s: RoomView) => s.config.betMode === 'rotating';
 
+/** 効果音のオン・オフ（端末ごとに覚える） */
+function SoundButton() {
+  const [on, setOn] = useState(soundOn());
+  return (
+    <button
+      type="button"
+      className={`pause-btn${on ? '' : ' on'}`}
+      aria-pressed={!on}
+      onClick={() => {
+        setSoundOn(!on);
+        setOn(!on);
+        if (!on) sfx.stamp();
+      }}
+    >
+      {on ? '音 あり' : '音 なし'}
+    </button>
+  );
+}
+
+/** テーブルの効果音: 状態の変化に合わせて鳴らす（演出の時間に揃える） */
+function useTableSounds(s: RoomView, g: GameView) {
+  const prev = useRef<{ gameNo: number; phase: string; revealed: number; declarers: number; joiners: number } | null>(null);
+  useEffect(() => {
+    const cur = {
+      gameNo: s.gameNo,
+      phase: g.phase,
+      revealed: g.seats.reduce((a, x) => a + x.revealed.length, 0),
+      declarers: g.challenge?.declarers.length ?? 0,
+      joiners: g.challenge?.joiners.length ?? 0,
+    };
+    const p = prev.current;
+    prev.current = cur;
+    if (!p) return; // 開いた直後（途中から開いた場合）は鳴らさない
+    if (p.gameNo !== cur.gameNo) {
+      for (let i = 0; i < 5; i++) sfx.flip(i * 0.09); // 配る
+      return;
+    }
+    if (cur.phase !== p.phase) {
+      if (cur.phase === 'boardReveal') g.seats.forEach((_, k) => sfx.flip(0.4 + k * 1.1));
+      if (cur.phase === 'ranking') g.seats.forEach((_, i) => sfx.stamp(stampDelay(g, i)));
+      if (cur.phase === 'result') {
+        sfx.win(0.2);
+        if (g.result?.nut) sfx.nut(1.1);
+      }
+    }
+    if (cur.revealed > p.revealed) sfx.flip();
+    if (cur.declarers > p.declarers) sfx.challenge();
+    if (cur.joiners > p.joiners) sfx.stamp();
+  });
+}
+
 function PauseButton({ room, s }: { room: Room; s: RoomView }) {
   return (
     <button type="button" className={`pause-btn${s.paused ? ' on' : ''}`} aria-pressed={s.paused} onClick={() => room.send({ t: 'pause', paused: !s.paused })}>
@@ -323,6 +377,7 @@ function TableBetting({ room, s }: { room: Room; s: RoomView }) {
           {s.gameNo} ゲーム目{s.config.maxGames ? ` ／ ${s.config.maxGames}` : ''}
         </span>
         <PauseButton room={room} s={s} />
+        <SoundButton />
       </header>
       <div className="betting">
         <span className="dealer big" aria-hidden="true">
@@ -348,6 +403,7 @@ function BetAnnounce({ s, g, names }: { s: RoomView; g: GameView; names: string[
     if (!rotatingBet(s) || g.phase !== 'placement' || seen.current === s.gameNo) return;
     seen.current = s.gameNo;
     setShown(s.gameNo);
+    sfx.stamp(0.15);
     const t = setTimeout(() => setShown(null), 2600);
     return () => clearTimeout(t);
   }, [s.gameNo, g.phase]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -501,11 +557,26 @@ function useSwapAnimation(g: GameView, gameNo: number): SwapAnim {
     for (let i = 0; i <= steps; i++) {
       t += 60 + (i / steps) ** 2.2 * 260;
       const idx = i % 5;
-      timers.push(setTimeout(() => setSt((p) => ({ ...p, highlight: idx })), t));
+      timers.push(
+        setTimeout(() => {
+          setSt((p) => ({ ...p, highlight: idx }));
+          sfx.tick();
+        }, t),
+      );
     }
-    timers.push(setTimeout(() => setSt((p) => ({ ...p, burning: true })), t + 500));
+    timers.push(
+      setTimeout(() => {
+        setSt((p) => ({ ...p, burning: true }));
+        sfx.swap();
+      }, t + 500),
+    );
     timers.push(setTimeout(() => setSt({ highlight: null, burning: false, done: true, revealNew: false }), t + 1250));
-    timers.push(setTimeout(() => setSt((p) => ({ ...p, revealNew: true })), t + 1450));
+    timers.push(
+      setTimeout(() => {
+        setSt((p) => ({ ...p, revealNew: true }));
+        sfx.flip();
+      }, t + 1450),
+    );
     return () => timers.forEach(clearTimeout);
   }, [key, g.phase, target]);
   return st;

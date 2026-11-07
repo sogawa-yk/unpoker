@@ -137,10 +137,11 @@ sim/            … 既存のシミュレーター（core ができたら core �
 - NoSQL テーブルは Terraform で ON_DEMAND（容量指定 0）として作れる
 - 本番 URL で 3 人（ボット）の 1 ゲームを、配置から結果まで通せた。ルームは NoSQL に保存される
 - 実機（iPad と iPhone の Safari）での操作感、QR からの参加、スリープからの復帰はいずれも問題なし（ユーザー確認）
+- 大阪の Generative AI で `openai.gpt-5.4-mini` を手元のプロファイルから呼べる（説明文 1 回 1.2〜2.6 秒）
 
 まだ確かめていないこと（いずれも今の構成には影響しない）:
 
 - API Gateway が WebSocket に対応しているか（使っていない）
 - Cloudflare のアイドルタイムアウトの正確な値（25 秒 ping で足りている）
-- Container Instance から Generative AI をリソース・プリンシパルで呼べるか（第 2 段階の AI 相談で確かめる）
+- Container Instance から Generative AI をリソース・プリンシパルで、サービス・ゲートウェイ経由で呼べるか（説明文を反映するときに確かめる）
 - `restart` で新しいイメージを取り直すか（今はタグを変えて作り直している）

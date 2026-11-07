@@ -422,3 +422,11 @@ button {
   font-size: 13px;
   margin: 0;
 }
+
+.home-recent {
+  display: grid;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--ai-line);
+  margin-bottom: 4px;
+}

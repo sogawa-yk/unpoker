@@ -24,6 +24,9 @@ export interface AdviceRecord {
   topic: AdviceTopic;
   fee: number;
   advice: Advice;
+  /** 生成 AI による説明文（作っている間は explaining、作れなければ null） */
+  explanation?: string | null;
+  explaining?: boolean;
 }
 
 export type Phase =

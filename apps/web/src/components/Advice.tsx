@@ -55,16 +55,20 @@ export function AdvicePanel({
     const a = rec.advice;
     if (compact && 'sets' in a)
       return (
-        <p className="advice advice-line">
-          <span className="advice-tag">AI</span>
-          <span>
-            枠に薄く出ている組み方がおすすめ。1 位の見込み <b>{pct(a.win)}</b>
-          </span>
-        </p>
+        <div className="advice">
+          <p className="advice-line">
+            <span className="advice-tag">AI</span>
+            <span>
+              枠に薄く出ている組み方がおすすめ。1 位の見込み <b>{pct(a.win)}</b>
+            </span>
+          </p>
+          <Explanation rec={rec} folded />
+        </div>
       );
     return (
       <section className="advice" aria-label="AI の答え">
         {'sets' in a ? <PlacementAnswer a={a} me={me} g={g} /> : <ChallengeAnswer a={a} name={name} />}
+        <Explanation rec={rec} />
       </section>
     );
   }
@@ -83,6 +87,29 @@ export function AdvicePanel({
     <PaidButton cost={fee} stack={me.stack} onDone={() => act({ type: 'consult' })} disabled={!g.extraPeeks || !enough} note={note}>
       長押しで AI に相談
     </PaidButton>
+  );
+}
+
+/** 生成 AI の説明文。数字の後から届く。作れなかったときは何も出さない */
+function Explanation({ rec, folded }: { rec: AdviceRecord; folded?: boolean }) {
+  if (rec.explaining)
+    return (
+      <p className="advice-explain pending" aria-live="polite">
+        AI が理由を書いています…
+      </p>
+    );
+  if (!rec.explanation) return null;
+  if (folded)
+    return (
+      <details className="advice-more">
+        <summary>AI の説明を読む</summary>
+        <p className="advice-explain">{rec.explanation}</p>
+      </details>
+    );
+  return (
+    <p className="advice-explain" aria-live="polite">
+      {rec.explanation}
+    </p>
   );
 }
 
@@ -146,7 +173,7 @@ function ChallengeAnswer({ a, name }: { a: ChallengeAdvice; name: (i: number) =>
         {label}
       </span>
       <span className="advice-opt-num">
-        {showWin && <>勝率 <b>{pct(o.win)}</b>・</>}期待 <b>{signed(Math.round(o.ev))}</b> 点
+        {showWin && <>勝率 <b>{pct(o.win)}</b>・</>}期待 <b>{signed(Math.round(o.ev) || 0)}</b> 点
       </span>
     </div>
   );
@@ -174,9 +201,9 @@ function ChallengeAnswer({ a, name }: { a: ChallengeAdvice; name: (i: number) =>
                   <tr key={i}>
                     <td>{others(s.others)}</td>
                     <td>
-                      {pct(s.win)}・{signed(Math.round(s.ev))}
+                      {pct(s.win)}・{signed(Math.round(s.ev) || 0)}
                     </td>
-                    <td>{signed(Math.round(n.ev))}</td>
+                    <td>{signed(Math.round(n.ev) || 0)}</td>
                   </tr>
                 );
               })}

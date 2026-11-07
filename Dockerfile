@@ -16,7 +16,7 @@ FROM node:24-alpine
 ENV NODE_ENV=production PORT=8080 WEB_ROOT=/app/web
 WORKDIR /app
 # NoSQL SDK は自分の package.json を実行時に読むため、バンドルせずに入れる
-RUN echo '{"type":"module","private":true}' > package.json && npm install --omit=dev --no-audit --no-fund oracle-nosqldb@5.5.4 && npm cache clean --force
+RUN echo '{"type":"module","private":true}' > package.json && npm install --omit=dev --no-audit --no-fund oracle-nosqldb@5.5.4 oci-common@2.145.0 oci-generativeaiinference@2.145.0 && npm cache clean --force
 COPY --from=build /src/apps/server/dist/index.js ./server.js
 COPY --from=build /src/apps/web/dist ./web
 USER node

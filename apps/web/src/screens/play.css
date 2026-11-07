@@ -547,3 +547,30 @@
 .bet-pick .st-btn:disabled {
   opacity: 0.3;
 }
+
+/* 生成 AI の説明文: 数字の答えの下に、語りかける文として置く */
+.advice-explain {
+  margin: 2px 0 0;
+  padding: 8px 10px;
+  border-left: 2px solid var(--hakuai);
+  background: rgb(169 188 214 / 0.08);
+  border-radius: 0 8px 8px 0;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--kinari);
+  white-space: pre-line;
+}
+.advice-explain.pending {
+  color: var(--hakuai);
+  animation: explain-pulse 1.4s ease-in-out infinite;
+}
+@keyframes explain-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .advice-explain.pending {
+    animation: none;
+  }
+}

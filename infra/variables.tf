@@ -51,3 +51,9 @@ variable "app_private_ip" {
   type        = string
   default     = "10.20.1.10"
 }
+
+variable "genai_model" {
+  description = "AI 相談の説明文に使う OCI Generative AI のモデル（空なら説明文なし）"
+  type        = string
+  default     = "openai.gpt-5.4-mini"
+}

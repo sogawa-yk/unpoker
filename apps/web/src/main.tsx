@@ -4,6 +4,8 @@ import { Card } from './components/Card.tsx';
 import { DevScreen } from './screens/Dev.tsx';
 import { PlayScreen } from './screens/Play.tsx';
 import { TableScreen } from './screens/Table.tsx';
+import { recentRooms } from './net.ts';
+import { installAudioUnlock } from './sound.ts';
 import './styles.css';
 
 // 画面は 3 つだけなので、ルーターは使わず URL を見て切り替える
@@ -36,6 +38,7 @@ function App() {
 function Home({ navigate }: { navigate: (p: string) => void }) {
   const [code, setCode] = useState('');
   const ok = /^[A-Za-z2-9]{6}$/.test(code);
+  const recent = recentRooms().slice(0, 3);
   return (
     <main className="home felt">
       <div className="home-cards" aria-hidden>
@@ -46,6 +49,15 @@ function Home({ navigate }: { navigate: (p: string) => void }) {
       <h1 className="home-title">unpoker</h1>
       <p className="home-lead">iPad をテーブルに、スマホを手札に。3〜4 人で遊ぶ、運試しのポーカー</p>
       <div className="home-actions">
+        {recent.length > 0 && (
+          <div className="home-recent">
+            {recent.map((r) => (
+              <button key={`${r.roomId}:${r.role}`} className="btn btn-shu" onClick={() => navigate(r.role === 'table' ? `/table/${r.roomId}` : `/play/${r.roomId}`)}>
+                続きから（{r.role === 'table' ? 'テーブル' : '手札'} {r.roomId}）
+              </button>
+            ))}
+          </div>
+        )}
         <button className="btn btn-shu" onClick={() => navigate('/table')}>
           この端末をテーブルにする
         </button>
@@ -67,8 +79,15 @@ function Home({ navigate }: { navigate: (p: string) => void }) {
   );
 }
 
+installAudioUnlock();
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />
   </StrictMode>,
 );
+
+// ホーム画面に追加したときに、画面の殻だけはすぐ開けるようにする（本番だけ。/dev では使わない）
+if (import.meta.env.PROD && 'serviceWorker' in navigator && !location.pathname.startsWith('/dev')) {
+  addEventListener('load', () => void navigator.serviceWorker.register('/sw.js').catch(() => {}));
+}

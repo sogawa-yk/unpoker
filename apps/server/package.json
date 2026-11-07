@@ -5,11 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "esbuild src/index.ts --bundle --platform=node --format=esm --target=node24 --outfile=dist/index.js --external:bufferutil --external:utf-8-validate --external:oracle-nosqldb --banner:js=\"import { createRequire } from 'module'; const require = createRequire(import.meta.url);\"",
+    "build": "esbuild src/index.ts --bundle --platform=node --format=esm --target=node24 --outfile=dist/index.js --external:bufferutil --external:utf-8-validate --external:oracle-nosqldb --external:oci-common --external:oci-generativeaiinference --banner:js=\"import { createRequire } from 'module'; const require = createRequire(import.meta.url);\"",
     "start": "node dist/index.js"
   },
   "dependencies": {
     "@unpoker/core": "0.0.0",
+    "oci-common": "^2.145.0",
+    "oci-generativeaiinference": "^2.145.0",
     "oracle-nosqldb": "^5.5.4",
     "ws": "^8.18.0",
     "zod": "^3.24.0"

@@ -19,6 +19,7 @@ import {
 import type { GameActionMsg, RoomStatus, RoomView, ServerMsg } from './protocol.ts';
 import { newPlayerId, newToken } from './ids.ts';
 import type { RoomStore } from './store.ts';
+import { buildPrompt, SYSTEM_PROMPT, type Explainer } from './explain.ts';
 
 export interface Timing {
   /** 配置フェーズの持ち時間 */
@@ -92,6 +93,8 @@ export interface RoomDeps {
   rng: Rng;
   now: () => number;
   log?: (msg: string, extra?: Record<string, unknown>) => void;
+  /** AI 相談の説明文（生成 AI）。無ければ数字だけ */
+  explainer?: Explainer;
 }
 
 export class RoomError extends Error {
@@ -261,6 +264,38 @@ export class Room {
     if (seat < 0) throw new RoomError('このゲームには参加していない');
     const action = { ...msg, seat } as GameAction;
     this.applyGame(action);
+    if (msg.type === 'consult') this.explain(seat);
+  }
+
+  /** 相談の答えに、生成 AI の説明文を後から添える（失敗しても数字の答えはそのまま） */
+  private explain(seat: number) {
+    const ex = this.deps.explainer;
+    const m = this.data.match;
+    const g = m?.game;
+    const rec = g?.seats[seat]?.advice.at(-1);
+    if (!ex || !m || !g || !rec) return;
+    const gameNo = m.gameNo;
+    const key = rec.key;
+    const names = m.seatIds.map((id) => this.data.players.find((p) => p.id === id)?.name ?? '？');
+    const prompt = buildPrompt(g, seat, rec, names);
+    rec.explaining = true;
+    this.commit();
+    const t0 = this.deps.now();
+    void ex
+      .explain(SYSTEM_PROMPT, prompt)
+      .catch((e) => {
+        this.deps.log?.('explain failed', { room: this.id, error: String(e) });
+        return null;
+      })
+      .then((text) => {
+        const cur = this.data.match;
+        const r = cur?.gameNo === gameNo ? cur.game?.seats[seat]?.advice.find((x) => x.key === key) : undefined;
+        if (!r) return;
+        r.explanation = text;
+        r.explaining = false;
+        this.deps.log?.('explained', { room: this.id, ms: this.deps.now() - t0, ok: text !== null });
+        this.commit();
+      });
   }
 
   private applyGame(action: GameAction) {
