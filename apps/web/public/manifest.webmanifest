@@ -1,0 +1,9 @@
+{
+  "name": "unpoker",
+  "short_name": "unpoker",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#16264a",
+  "theme_color": "#16264a",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}

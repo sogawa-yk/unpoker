@@ -1,0 +1,270 @@
+/* 手札（スマホ縦向き） */
+.ply {
+  position: fixed;
+  inset: 0;
+  overflow-y: auto;
+  padding: max(12px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+}
+.ply-center {
+  min-height: 100%;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  text-align: center;
+  gap: 10px;
+  padding: 24px 8px;
+}
+.ply-big {
+  margin: 0;
+  font-family: var(--mincho);
+  font-size: 24px;
+  color: var(--kinari);
+}
+.small {
+  font-size: 13px;
+}
+.ply-wordmark {
+  margin: 0 0 24px;
+  font-family: var(--mincho);
+  font-weight: 600;
+  font-size: 44px;
+  letter-spacing: 0.08em;
+  color: var(--kinari);
+  text-align: center;
+}
+.join {
+  min-height: 100%;
+  display: grid;
+  align-content: center;
+  gap: 14px;
+  max-width: 420px;
+  margin: 0 auto;
+}
+.join-label {
+  color: var(--hakuai);
+}
+.join-room {
+  text-align: center;
+  letter-spacing: 0.2em;
+}
+
+.pg {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 480px;
+  margin: 0 auto;
+}
+.pg-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.pg-name {
+  font-weight: 700;
+  font-size: 18px;
+}
+.pg-bet {
+  margin-left: auto;
+  font-size: 13px;
+}
+.pg-gauge {
+  min-height: 3px;
+}
+.pg-gauge:has(.gauge.paused) {
+  min-height: 22px;
+}
+.pg-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.pg-actions {
+  margin-top: auto;
+  display: grid;
+  gap: 10px;
+  padding-top: 8px;
+}
+.pg-note {
+  text-align: center;
+  margin: 0;
+}
+.instr {
+  min-height: 64px;
+}
+.instr-main {
+  margin: 4px 0 2px;
+  font-family: var(--mincho);
+  font-weight: 600;
+  font-size: 22px;
+  color: var(--kinari);
+}
+.instr-sub {
+  margin: 0;
+  font-size: 13px;
+  color: var(--hakuai);
+}
+.hand7 {
+  display: grid;
+  grid-template-columns: repeat(4, auto);
+  justify-content: center;
+  gap: 12px 10px;
+  padding-top: 8px;
+}
+.hand7 > div:nth-child(n + 5) {
+  transform: translateX(43px);
+}
+.miniboard {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  padding: 8px;
+  border-radius: 12px;
+  background: rgb(0 0 0 / 0.16);
+}
+.placed-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+.sets3 {
+  display: grid;
+  gap: 12px;
+  justify-items: center;
+}
+.set {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 14px;
+  background: rgb(0 0 0 / 0.14);
+  box-shadow: inset 0 0 0 1px rgb(201 162 74 / 0.22);
+}
+.rank-box {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 18px 0 6px;
+}
+.ply-seal {
+  font-size: 34px;
+}
+.rank-hand {
+  font-family: var(--mincho);
+  font-size: 22px;
+  color: var(--kinari);
+}
+.decision {
+  margin-top: auto;
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border-radius: 18px;
+  background: rgb(0 0 0 / 0.25);
+  box-shadow: 0 0 0 1.5px rgb(207 66 39 / 0.6);
+}
+.decision-title {
+  margin: 0;
+  font-family: var(--mincho);
+  font-size: 22px;
+  color: var(--kinari);
+}
+.decision-body {
+  margin: 0 0 6px;
+  font-size: 14px;
+  color: var(--hakuai);
+}
+.ply-delta {
+  margin: 8px 0 0;
+  text-align: center;
+  font-size: 48px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.ply-delta.plus {
+  color: var(--kin-hi);
+}
+.ply-delta.minus {
+  color: #f3a08f;
+}
+.ply-nut {
+  text-align: center;
+  font-family: var(--mincho);
+  color: var(--kin-hi);
+  margin: 0;
+}
+.dealer {
+  font-family: var(--mincho);
+  font-size: 12px;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--kinari);
+  color: var(--sumi);
+}
+@media (max-width: 360px) {
+  .hand7 {
+    gap: 10px 6px;
+  }
+}
+
+.sets3.compact {
+  grid-auto-flow: column;
+  justify-content: center;
+  gap: 8px;
+}
+.sets3.compact .set {
+  padding: 5px 6px;
+  gap: 4px;
+}
+.set.best {
+  box-shadow: inset 0 0 0 1.5px var(--kin-hi);
+}
+
+/* 組分け: 上に 3 組の枠、下に手元の札 */
+.slotset {
+  gap: 10px;
+  padding: 6px 14px;
+  transition: box-shadow 0.25s;
+}
+.slotset.done {
+  box-shadow: inset 0 0 0 1.5px rgb(240 214 138 / 0.6);
+}
+.slot {
+  width: 64px;
+  aspect-ratio: 5 / 7;
+  padding: 0;
+  border: 1.5px dashed var(--ai-line);
+  border-radius: var(--radius-card);
+  background: rgb(0 0 0 / 0.12);
+  display: grid;
+  place-items: center;
+  transition: border-color 0.2s, background 0.2s;
+}
+.slot:has(.card) {
+  border-color: transparent;
+  background: none;
+}
+.slot.ready {
+  border-color: var(--kin-hi);
+  background: rgb(240 214 138 / 0.08);
+}
+.tray {
+  min-height: 90px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 6px;
+  border-radius: 14px;
+  background: rgb(0 0 0 / 0.22);
+}
+.tray-empty {
+  font-size: 13px;
+}

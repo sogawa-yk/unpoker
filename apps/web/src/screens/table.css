@@ -1,0 +1,470 @@
+/* テーブル（iPad 横向き）。各席の表示は、その席に座る人の向きに回転させる */
+.tbl {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+}
+.tbl-center {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+
+/* ---- 待機 ---- */
+.lobby {
+  height: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+  gap: clamp(24px, 5vw, 72px);
+  padding: max(32px, env(safe-area-inset-top)) clamp(24px, 5vw, 72px) 32px;
+  align-items: center;
+}
+.lobby-join {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+}
+.wordmark {
+  margin: 0 0 8px;
+  font-family: var(--mincho);
+  font-weight: 600;
+  font-size: clamp(44px, 6vw, 72px);
+  letter-spacing: 0.08em;
+  color: var(--kinari);
+  line-height: 1;
+}
+.wordmark.small {
+  font-size: 44px;
+}
+.qr {
+  width: clamp(180px, 26vw, 280px);
+  aspect-ratio: 1;
+  padding: 18px;
+  background: var(--kinari);
+  border-radius: 14px;
+  box-shadow: 0 0 0 6px var(--kin), 0 14px 40px rgb(0 0 0 / 0.45);
+}
+.qr svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.lobby-hint {
+  margin: 10px 0 0;
+  color: var(--hakuai);
+}
+.room-code {
+  margin: 0;
+  font-family: var(--mincho);
+  font-size: 34px;
+  letter-spacing: 0.3em;
+  color: var(--kin-hi);
+}
+.lobby-side {
+  display: grid;
+  gap: 14px;
+  align-content: center;
+}
+.lobby-h {
+  margin: 8px 0 0;
+  font-family: var(--mincho);
+  font-weight: 600;
+  font-size: 20px;
+  color: var(--kinari);
+}
+.lobby-players {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.lobby-players li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 0 14px;
+  border-radius: 12px;
+  background: rgb(0 0 0 / 0.18);
+}
+.lobby-players li.empty {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--ai-line);
+}
+.lp-name {
+  flex: 1;
+  font-size: 18px;
+}
+.lp-kick {
+  border: 0;
+  background: none;
+  color: var(--hakuai);
+  font-size: 13px;
+}
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--ai-line);
+}
+.dot.on {
+  background: #7fd18b;
+}
+.settings {
+  display: grid;
+  gap: 6px;
+}
+.stepper {
+  display: grid;
+  grid-template-columns: 1fr auto auto minmax(96px, auto) auto auto;
+  align-items: center;
+  gap: 4px;
+}
+.st-label {
+  color: var(--hakuai);
+}
+.st-value {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 18px;
+}
+.st-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 0;
+  background: rgb(0 0 0 / 0.2);
+  font-size: 18px;
+}
+.start {
+  margin-top: 10px;
+  font-size: 18px;
+  padding: 1em;
+}
+
+/* ---- 対局 ---- */
+.game {
+  position: absolute;
+  inset: 0;
+}
+.game-head {
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  left: 18px;
+  display: flex;
+  gap: 18px;
+  font-size: 14px;
+  color: var(--hakuai);
+  z-index: 2;
+}
+.game-head > span {
+  align-self: center;
+}
+/* 持ち時間の一時停止（テーブルだけが操作できる） */
+.pause-btn {
+  font: inherit;
+  font-size: 15px;
+  min-height: 44px; /* 指で押しやすい大きさ */
+  padding: 8px 18px;
+  border-radius: 999px;
+  border: 1px solid var(--ai-line);
+  background: rgb(0 0 0 / 0.2);
+  color: var(--hakuai);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.pause-btn.on {
+  border-color: var(--kin);
+  background: rgb(201 162 74 / 0.18);
+  color: var(--kin-hi);
+}
+.pause-btn:focus-visible {
+  outline: 2px solid var(--kin-hi);
+  outline-offset: 2px;
+}
+.arena {
+  position: absolute;
+  inset: 0;
+}
+.center {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: grid;
+  justify-items: center;
+  gap: 16px;
+  width: min(560px, 60vw);
+}
+.banner-wrap {
+  position: relative;
+  min-height: 46px;
+  display: grid;
+  place-items: center;
+}
+.banner {
+  margin: 0;
+  font-family: var(--mincho);
+  font-weight: 600;
+  font-size: 26px;
+  letter-spacing: 0.06em;
+  color: var(--kinari);
+  text-align: center;
+  text-shadow: 0 2px 10px rgb(0 0 0 / 0.5);
+}
+.banner.win {
+  color: var(--kin-hi);
+  font-size: 32px;
+}
+.seal.challenge {
+  position: absolute;
+  top: -62px;
+  font-size: 22px;
+}
+.board {
+  display: flex;
+  gap: 12px;
+  padding: 14px 18px;
+  border-radius: 16px;
+  background: rgb(0 0 0 / 0.16);
+  box-shadow: inset 0 0 0 1px rgb(201 162 74 / 0.25);
+}
+.board-slot {
+  position: relative;
+}
+.roulette {
+  position: absolute;
+  inset: -6px;
+  border-radius: 11px;
+  box-shadow: 0 0 0 3px var(--kin-hi), 0 0 26px 6px rgb(240 214 138 / 0.65);
+  pointer-events: none;
+}
+.center-gauge {
+  width: 60%;
+}
+.next {
+  margin-top: 4px;
+  font-size: 18px;
+}
+
+/* 席 */
+.seat {
+  position: absolute;
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 10px 14px 12px;
+  border-radius: 16px;
+  transition: background 0.3s, box-shadow 0.3s, opacity 0.4s;
+  width: 440px;
+}
+.seat.spot {
+  background: rgb(240 214 138 / 0.08);
+  box-shadow: 0 0 0 1.5px rgb(240 214 138 / 0.55), 0 0 40px rgb(240 214 138 / 0.18);
+}
+.seat.out {
+  opacity: 0.5;
+}
+.seat.winner {
+  background: rgb(240 214 138 / 0.12);
+  box-shadow: 0 0 0 2px var(--kin);
+}
+.side-bottom {
+  left: 50%;
+  bottom: max(8px, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+}
+.side-top {
+  left: 50%;
+  top: 8px;
+  transform: translateX(-50%) rotate(180deg);
+}
+.side-left {
+  left: 0;
+  top: 50%;
+  transform: translate(-50%, -50%) rotate(90deg) translateY(-50%);
+  transform-origin: center;
+}
+.side-right {
+  right: 0;
+  top: 50%;
+  transform: translate(50%, -50%) rotate(-90deg) translateY(-50%);
+  transform-origin: center;
+}
+.seat-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 20px;
+}
+.seat-name {
+  font-weight: 700;
+  font-size: 23px;
+}
+.seat .seal {
+  font-size: 18px;
+}
+.dealer {
+  font-family: var(--mincho);
+  font-size: 12px;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--kinari);
+  color: var(--sumi);
+}
+.tag {
+  font-size: 12px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--shu);
+  color: #fff;
+}
+.seat-cards {
+  display: flex;
+  gap: 12px;
+  min-height: 86px;
+  align-items: flex-end;
+}
+.pair {
+  display: flex;
+  gap: 3px;
+  padding: 3px;
+  border-radius: 9px;
+}
+.pair.best {
+  box-shadow: 0 0 0 1.5px rgb(240 214 138 / 0.7);
+}
+.pair.loose {
+  gap: 4px;
+}
+.seat-foot {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 16px;
+}
+.live-hand {
+  font-family: var(--mincho);
+  font-weight: 600;
+  font-size: 19px;
+  color: var(--kinari);
+}
+.odds {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+/* この先なりそうな役。フルハウス以上は金で目立たせる */
+.chance {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 1px 9px;
+  border-radius: 999px;
+  font-size: 14px;
+  color: var(--hakuai);
+  box-shadow: inset 0 0 0 1px var(--ai-line);
+}
+.chance b {
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.chance.big {
+  color: var(--kin-hi);
+  box-shadow: inset 0 0 0 1px var(--kin);
+  background: rgb(201 162 74 / 0.12);
+}
+.chance.big b {
+  color: var(--kin-hi);
+}
+.delta {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 26px;
+}
+.delta.plus {
+  color: var(--kin-hi);
+}
+.delta.minus {
+  color: #f3a08f;
+}
+
+/* ナッツ */
+.nut {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 18px;
+  background: radial-gradient(circle, rgb(240 214 138 / 0.35), rgb(22 38 74 / 0.85) 70%);
+  z-index: 10;
+  pointer-events: none;
+}
+.nut-seal {
+  font-size: 72px;
+  padding: 0.1em 0.5em;
+}
+.nut p {
+  margin: 0;
+  font-family: var(--mincho);
+  font-size: 20px;
+  color: var(--kinari);
+}
+
+/* 終了 */
+.finished {
+  height: 100%;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 18px;
+}
+.final-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 14px;
+  min-width: 380px;
+}
+.final-list li {
+  display: grid;
+  grid-template-columns: 76px 1fr auto;
+  align-items: center;
+  gap: 16px;
+  font-size: 22px;
+}
+.final-name {
+  font-weight: 700;
+}
+
+/* 縦向きや小さい画面では、席を小さくする */
+@media (max-width: 900px), (orientation: portrait) {
+  .seat {
+    width: 400px;
+    transform-origin: center;
+  }
+  .side-bottom {
+    transform: translateX(-50%) scale(0.85);
+  }
+  .side-top {
+    transform: translateX(-50%) rotate(180deg) scale(0.85);
+  }
+  .center {
+    width: 92vw;
+  }
+  .lobby {
+    grid-template-columns: 1fr;
+    overflow: auto;
+  }
+}

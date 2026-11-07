@@ -1,0 +1,6 @@
+# terraform.tfvars にコピーして値を入れる（terraform.tfvars は git 管理外）
+oci_profile      = "DEFAULT"
+compartment_ocid = "ocid1.compartment.oc1..xxxx"
+origin_cert_path = "~/.unpoker/origin.pem"
+origin_key_path  = "~/.unpoker/origin.key"
+image_tag        = "latest"
