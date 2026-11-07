@@ -1,0 +1,88 @@
+.dev {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: #0f1b36;
+  font-size: 14px;
+}
+.dev-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--ai-line);
+  flex-wrap: wrap;
+}
+.dev-room {
+  color: var(--kin-hi);
+  letter-spacing: 0.1em;
+}
+.dev-bar select,
+.dev-phone-bar input[type='text'],
+.dev-phone-bar input:not([type]) {
+  font: inherit;
+  background: rgb(0 0 0 / 0.25);
+  color: var(--text);
+  border: 1px solid var(--ai-line);
+  border-radius: 6px;
+  padding: 2px 6px;
+  margin-left: 6px;
+}
+.dev-btn {
+  border: 1px solid var(--ai-line);
+  background: rgb(255 255 255 / 0.06);
+  border-radius: 6px;
+  padding: 4px 10px;
+}
+.dev-hint {
+  color: var(--hakuai);
+  font-size: 12px;
+}
+.dev-area {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+  align-items: flex-start;
+}
+.dev-table {
+  overflow: hidden;
+  border-radius: 12px;
+  box-shadow: 0 0 0 6px #050a16, 0 10px 30px rgb(0 0 0 / 0.5);
+  flex: none;
+}
+.dev-table iframe,
+.dev-phone-frame iframe {
+  border: 0;
+  transform-origin: 0 0;
+  display: block;
+}
+.dev-phones {
+  display: grid;
+  gap: 10px 12px;
+}
+.dev-phone {
+  display: grid;
+  gap: 4px;
+}
+.dev-phone-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  font-size: 11px;
+  white-space: nowrap;
+  min-width: 0;
+}
+.dev-phone-bar input:not([type='checkbox']) {
+  width: 100%;
+  min-width: 0;
+  margin-left: 0;
+}
+.dev-phone-frame {
+  overflow: hidden;
+  border-radius: 14px;
+  box-shadow: 0 0 0 4px #050a16;
+}

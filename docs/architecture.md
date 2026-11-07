@@ -10,7 +10,7 @@
 | OCI CLI プロファイル | 各自のプロファイル（`infra/terraform.tfvars` の `oci_profile` に書く） |
 | リージョン | **ap-osaka-1**（大阪） |
 | コンパートメント | 個人用のコンパートメント（名前と OCID はリポジトリに含めず、`infra/terraform.tfvars` に書く。このファイルは git 管理外） |
-| ドメイン | Cloudflare で取得済み。サブドメインは未定 |
+| ドメイン | Cloudflare で取得済みのドメインのサブドメイン（名前はリポジトリに書かない） |
 | 方針 | マネージドサービスを優先するクラウドネイティブ構成。コンポーネントは最小限 |
 
 2026-11-07 に大阪リージョンで確認したこと：
@@ -86,7 +86,7 @@
 
 ## 6. アプリケーション構成
 
-pnpm workspace のモノレポにする。
+npm workspaces のモノレポにする（追加のツールが要らないため。pnpm は未導入）。
 
 ```
 packages/core   … ルールエンジン（純粋な TypeScript。役判定、進行の状態遷移、サイドポット、ナッツ判定、AI 計算）
@@ -129,8 +129,18 @@ sim/            … 既存のシミュレーター（core ができたら core �
 
 ## 8. 未検証・未決の項目
 
-- API Gateway が WebSocket に対応しているか（使わないので、構成には影響しない）
-- Cloudflare と OCI LB の WebSocket のアイドルタイムアウトの実際の値
-- Container Instance から Generative AI と NoSQL を呼ぶときの認証方式（リソース・プリンシパルが使えるか）
-- `restart` で新しいイメージを取り直すか
-- 使うサブドメイン
+2026-11-07 の構築で確かめたこと:
+
+- Cloudflare で管理しているドメインのサブドメインで公開する（実際の名前はリポジトリに書かない。Cloudflare プロキシ有効、SSL/TLS は Full (strict)、Origin CA 証明書を LB に載せる）
+- Cloudflare → OCI LB（HTTP リスナー、アイドルタイムアウト 300 秒）→ Container Instance で WebSocket が通る。無操作 70 秒でも切れない（アプリの 25 秒 ping あり）
+- Container Instance はリソース・プリンシパル（既存の動的グループ）で OCIR からイメージを取得でき、NoSQL にも読み書きできる
+- NoSQL テーブルは Terraform で ON_DEMAND（容量指定 0）として作れる
+- 本番 URL で 3 人（ボット）の 1 ゲームを、配置から結果まで通せた。ルームは NoSQL に保存される
+- 実機（iPad と iPhone の Safari）での操作感、QR からの参加、スリープからの復帰はいずれも問題なし（ユーザー確認）
+
+まだ確かめていないこと（いずれも今の構成には影響しない）:
+
+- API Gateway が WebSocket に対応しているか（使っていない）
+- Cloudflare のアイドルタイムアウトの正確な値（25 秒 ping で足りている）
+- Container Instance から Generative AI をリソース・プリンシパルで呼べるか（第 2 段階の AI 相談で確かめる）
+- `restart` で新しいイメージを取り直すか（今はタグを変えて作り直している）

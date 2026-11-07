@@ -5,3 +5,5 @@ infra/terraform.tfvars
 infra/.terraform/
 infra/*.tfstate*
 .obsidian-dir
+.data/
+.claude/launch.json
