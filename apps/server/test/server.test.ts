@@ -240,6 +240,24 @@ describe('サーバー', () => {
     await table.until(() => table.state!.game!.phase !== 'placement', 4000);
   });
 
+  it('AI 相談: 相談したことは全員に見え、中身は本人だけに届く', async () => {
+    const { url } = await start();
+    const { table, players } = await setupRoom(url, ['相', '談', '者']);
+    players.forEach((p) => (p.idle = true));
+    table.send({ t: 'start' });
+    const p = players[0]!;
+    await p.until(() => p.state!.game?.phase === 'placement');
+    const seat = p.state!.game!.you!;
+    for (const index of [0, 1, 2]) p.send({ t: 'action', action: { type: 'peek', index } });
+    await p.until(() => p.state!.game!.seats[seat]!.peekedCount === 3);
+    p.send({ t: 'action', action: { type: 'consult' } });
+    await p.until(() => p.state!.game!.seats[seat]!.advice.length === 1);
+    expect(p.state!.game!.seats[seat]!.adviceFee).toBe(10);
+    await table.until(() => table.state!.game!.seats[seat]!.consulted.length === 1);
+    expect(table.state!.game!.seats[seat]!.advice).toEqual([]);
+    expect(JSON.stringify(players[1]!.state)).not.toContain('"candidates"');
+  });
+
   it('サーバーを再起動しても、保存した状態から続けられる', async () => {
     const store = new MemoryStore();
     const first = await start(store);

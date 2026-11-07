@@ -3,8 +3,9 @@ import { AnimatePresence, LayoutGroup, motion, type PanInfo } from 'motion/react
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { arrangeSets, chooseBoardIndex, handName, type Card as CardT, type GameView, type SeatView } from '@unpoker/core';
 import type { GameActionMsg } from '../../../server/src/protocol.ts';
-import { Card } from '../components/Card.tsx';
-import { Chips, ConnBadge, Gauge, HoldButton, signed, Toast } from '../components/bits.tsx';
+import { Card, cardName } from '../components/Card.tsx';
+import { AdvicePanel, adviceNow, arrangePlan } from '../components/Advice.tsx';
+import { Chips, ConnBadge, Gauge, HoldButton, PaidButton, StackChips, signed, Toast } from '../components/bits.tsx';
 import { provisionalRank } from '../game.ts';
 import { savedToken, useRoom, type Room, type RoomView } from '../net.ts';
 import './play.css';
@@ -132,13 +133,19 @@ function PhoneGame({ room, s }: { room: Room; s: RoomView }) {
       <header className="pg-head">
         <span className="pg-name">{name(g.you)}</span>
         {g.dealer === g.you && <span className="dealer">親</span>}
-        <Chips n={g.result ? g.result.stacks[g.you]! : me.stack} />
+        <StackChips n={g.result ? g.result.stacks[g.you]! : me.stack} />
+        {me.peekFee + me.adviceFee > 0 && (
+          <span className="paid-pill" title="追加めくりと AI 相談に払った額。次のゲームの持ち越しポットに入ります">
+            <i className="coin" aria-hidden="true" />
+            払った {me.peekFee + me.adviceFee}
+          </span>
+        )}
         <span className="pg-bet muted">ベット {g.bet}</span>
       </header>
       <MyGauge room={room} g={g} />
       <main className="pg-main">
         {g.phase === 'placement' ? (
-          <Placement g={g} me={me} act={act} />
+          <Placement g={g} me={me} act={act} name={name} />
         ) : (
           <AfterPlacement g={g} me={me} act={act} name={name} />
         )}
@@ -158,13 +165,15 @@ function MyGauge({ room, g }: { room: Room; g: GameView }) {
 
 const ALL = [0, 1, 2, 3, 4, 5, 6];
 
-function Placement({ g, me, act }: { g: GameView; me: SeatView; act: (a: GameActionMsg) => void }) {
+function Placement({ g, me, act, name }: { g: GameView; me: SeatView; act: (a: GameActionMsg) => void; name: (i: number) => string }) {
   const [sel, setSel] = useState<number | null>(null);
   /** 追加でめくろうとしている札（料金がかかるので、長押しで確定する） */
   const [buy, setBuy] = useState<number | null>(null);
   const boardKnown = g.board.filter((c): c is CardT => c !== null);
   if (me.arranged) return <MySets g={g} me={me} hint="配置しました。他の人を待っています" />;
-  if (me.placed) return <Arrange me={me} act={act} />;
+  if (me.placed) return <Arrange g={g} me={me} act={act} name={name} />;
+  const rec = adviceNow(g, me);
+  const aiPick = rec && rec.advice.topic === 'place' ? rec.advice.boardIndex : null;
 
   const peeking = me.peekedCount < 3;
   const price = g.peekPrice;
@@ -182,7 +191,7 @@ function Placement({ g, me, act }: { g: GameView; me: SeatView; act: (a: GameAct
         sub={peeking ? '中身は誰にも見えません' : `選んだ札を上にはじくと、場に出ます。${buyNote}`}
       />
       {extra > 0 && (
-        <p className="pg-note">
+        <p className="paid-note">
           追加で {extra} 枚めくりました（{extra * price} 点）。めくった枚数は iPad に出ます
         </p>
       )}
@@ -219,7 +228,13 @@ function Placement({ g, me, act }: { g: GameView; me: SeatView; act: (a: GameAct
               onClick={onClick}
               label={known ? undefined : peeking ? 'めくる' : canBuy ? `${price} 点で追加でめくる` : '伏せ札'}
             >
-              {!known && canBuy && <span className="price-tag">{price}</span>}
+              {!known && canBuy && (
+                <span className="price-tag" aria-hidden="true">
+                  <i className="coin" />
+                  {price}
+                </span>
+              )}
+              {aiPick === k && <span className="ai-mark">AI</span>}
             </Card>
           );
           if (!isSel) return <div key={k}>{node}</div>;
@@ -241,16 +256,19 @@ function Placement({ g, me, act }: { g: GameView; me: SeatView; act: (a: GameAct
         })}
       </div>
       <div className="pg-actions">
+        {!peeking && buy === null && <AdvicePanel g={g} me={me} act={act} name={name} />}
         {!peeking && buy !== null && (
-          <HoldButton
-            className="btn btn-wide btn-buy"
+          <PaidButton
+            cost={price}
+            stack={me.stack}
             onDone={() => {
               act({ type: 'peek', index: buy });
               setBuy(null);
             }}
+            note="もう一度タップすると、選ぶのをやめます"
           >
-            長押しで {price} 点払ってめくる
-          </HoldButton>
+            長押しでこの札をめくる
+          </PaidButton>
         )}
         {!peeking && buy === null && (
           <button className="btn btn-wide" disabled={sel === null} onClick={() => sel !== null && act({ type: 'place', index: sel })}>
@@ -266,7 +284,7 @@ function Placement({ g, me, act }: { g: GameView; me: SeatView; act: (a: GameAct
  * 3 組を自分で作る。6 枚は下の手元に並び、タップかドラッグで上の 3 組の枠へ 1 枚ずつ置いていく。
  * 伏せ札は確率的にはどこに置いても同じだが、自分で置いて決めることを大事にする（おまかせの初期配置はしない）
  */
-function Arrange({ me, act }: { me: SeatView; act: (a: GameActionMsg) => void }) {
+function Arrange({ g, me, act, name }: { g: GameView; me: SeatView; act: (a: GameActionMsg) => void; name: (i: number) => string }) {
   const hand = ALL.filter((k) => k !== me.boardIndex);
   // slots[pos] = 置いた札の位置（手札の index）。pos 0-1 が 1 組目、2-3 が 2 組目、4-5 が 3 組目
   const [slots, setSlots] = useState<(number | null)[]>([null, null, null, null, null, null]);
@@ -274,6 +292,7 @@ function Arrange({ me, act }: { me: SeatView; act: (a: GameActionMsg) => void })
   // ドラッグを離した直後のタップは無視する（離した瞬間にタップ扱いになって札が選ばれてしまうため）
   const draggedAt = useRef(0);
   const tray = hand.filter((k) => !slots.includes(k));
+  const plan = arrangePlan(g, me);
   const full = slots.every((x) => x !== null);
 
   /** 札 k を枠 pos に置く。枠に別の札があれば入れ替える（k が枠にあった場合は位置を交換、手元から来た場合は元の札を手元へ） */
@@ -360,7 +379,13 @@ function Arrange({ me, act }: { me: SeatView; act: (a: GameActionMsg) => void })
                     onClick={() => tapSlot(pos)}
                     aria-label={`${si + 1} 組目の ${j + 1} 枚目${k === null ? '（空き）' : ''}`}
                   >
-                    {k !== null && k !== undefined ? cardNode(k, 64) : null}
+                    {k !== null && k !== undefined ? (
+                      cardNode(k, 64)
+                    ) : plan ? (
+                      <span className="slot-ghost" aria-hidden="true">
+                        {me.known.includes(plan[pos]!) && me.cards[plan[pos]!] != null ? cardName(me.cards[plan[pos]!]!) : '？'}
+                      </span>
+                    ) : null}
                   </button>
                 );
               })}
@@ -372,6 +397,7 @@ function Arrange({ me, act }: { me: SeatView; act: (a: GameActionMsg) => void })
         </div>
       </LayoutGroup>
       <div className="pg-actions">
+        <AdvicePanel g={g} me={me} act={act} name={name} compact />
         <HoldButton className="btn btn-wide" disabled={!full} onDone={() => act({ type: 'arrange', sets: [[slots[0]!, slots[1]!], [slots[2]!, slots[3]!], [slots[4]!, slots[5]!]] })}>
           {full ? '長押しでこの組に決める' : '6 枚すべて置くと決められます'}
         </HoldButton>
@@ -421,6 +447,7 @@ function AfterPlacement({ g, me, act, name }: { g: GameView; me: SeatView; act: 
               onYes={() => act({ type: 'declare', yes: true })}
               onNo={() => act({ type: 'declare', yes: false })}
               disabledYes={me.stack <= 0}
+              advice={<AdvicePanel g={g} me={me} act={act} name={name} />}
             />
           )}
           {g.phase === 'join' && optMe && !me.joinDone && (
@@ -430,6 +457,7 @@ function AfterPlacement({ g, me, act, name }: { g: GameView; me: SeatView; act: 
               yes={`長押しで乗る（${g.bet}）`}
               onYes={() => act({ type: 'join', yes: true })}
               onNo={() => act({ type: 'join', yes: false })}
+              advice={<AdvicePanel g={g} me={me} act={act} name={name} />}
             />
           )}
           <p className="muted pg-note">{waitingNote(g, you, name)}</p>
@@ -476,11 +504,12 @@ function waitingNote(g: GameView, you: number, name: (i: number) => string): str
   }
 }
 
-function Decision(props: { title: string; body: string; yes: string; onYes: () => void; onNo: () => void; disabledYes?: boolean }) {
+function Decision(props: { title: string; body: string; yes: string; onYes: () => void; onNo: () => void; disabledYes?: boolean; advice?: React.ReactNode }) {
   return (
     <motion.section className="decision" initial={{ y: 30, opacity: 0 }} animate={{ y: 0, opacity: 1 }}>
       <h2 className="decision-title">{props.title}</h2>
       <p className="decision-body">{props.body}</p>
+      {props.advice}
       <HoldButton className="btn btn-shu btn-wide" onDone={props.onYes} disabled={props.disabledYes} ms={700}>
         {props.yes}
       </HoldButton>

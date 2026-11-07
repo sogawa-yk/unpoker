@@ -417,6 +417,11 @@ function SeatPanel({ g, seat, sv, name, side, swapDone, odds }: { g: GameView; s
   if (ch?.forced.includes(seat)) tags.push('受けて立つ');
   if (ch?.joiners.includes(seat)) tags.push('便乗');
   if (sv.peekedCount > 3) tags.push(`追加めくり ${sv.peekedCount - 3}`);
+  // AI に相談したことは公開する（B-6）。今の判断で相談していれば「相談中」
+  const nowTopics = g.phase === 'placement' ? ['place', 'arrange'] : g.phase === 'declare' || g.phase === 'join' ? [g.phase] : [];
+  const consulting = sv.consulted.some((t) => nowTopics.includes(t)) && (g.phase !== 'placement' || !sv.arranged);
+  if (consulting) tags.push('AI 相談中');
+  else if (sv.consulted.length > 0) tags.push(`AI 相談 ${sv.consulted.length}`);
 
   return (
     <div className={`seat side-${side}${spotlight ? ' spot' : ''}${out ? ' out' : ''}${winner ? ' winner' : ''}`}>
@@ -425,7 +430,7 @@ function SeatPanel({ g, seat, sv, name, side, swapDone, odds }: { g: GameView; s
         {g.dealer === seat && <span className="dealer" aria-label="親">親</span>}
         <Chips n={res ? res.stacks[seat]! : sv.stack} />
         {tags.map((t) => (
-          <span key={t} className="tag">
+          <span key={t} className={`tag${t.startsWith('AI') ? ' ai' : t.startsWith('追加') ? ' kin' : ''}`}>
             {t}
           </span>
         ))}

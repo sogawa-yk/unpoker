@@ -106,3 +106,75 @@ export function ConnBadge({ room }: { room: Room }) {
 export const Chips = ({ n, className = '' }: { n: number; className?: string }) => <span className={`chips ${className}`}>{n.toLocaleString()}</span>;
 
 export const signed = (n: number) => (n > 0 ? `+${n.toLocaleString()}` : n.toLocaleString());
+
+/**
+ * 有料の操作（追加めくり、AI 相談）。金の小判で値段を見せ、押す前に「持ち点がいくつになるか」を見せる。
+ * 押し間違えで払わないよう、長押しで確定する
+ */
+export function PaidButton({
+  cost,
+  stack,
+  onDone,
+  disabled,
+  note,
+  children,
+}: {
+  cost: number;
+  stack: number;
+  onDone: () => void;
+  disabled?: boolean;
+  /** ボタンの下の説明（払えないときは理由） */
+  note?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="paid">
+      <HoldButton className="btn btn-wide btn-paid" onDone={onDone} disabled={disabled}>
+        <span className="paid-label">{children}</span>
+        <span className="paid-cost">
+          <i className="coin" aria-hidden="true" />−{cost}
+        </span>
+      </HoldButton>
+      {!disabled && (
+        <p className="paid-receipt">
+          持ち点 <b>{stack.toLocaleString()}</b> → <b>{(stack - cost).toLocaleString()}</b>。料金は次のゲームの持ち越しポットへ
+        </p>
+      )}
+      {note && <p className="paid-note">{note}</p>}
+    </div>
+  );
+}
+
+/** 持ち点。減ったときは、減った分を横に浮かせて見せる（払ったことが目に残るように） */
+export function StackChips({ n }: { n: number }) {
+  const prev = useRef(n);
+  const [drops, setDrops] = useState<{ id: number; v: number }[]>([]);
+  useEffect(() => {
+    const d = n - prev.current;
+    prev.current = n;
+    if (d >= 0) return;
+    const id = performance.now();
+    setDrops((x) => [...x, { id, v: d }]);
+    const t = setTimeout(() => setDrops((x) => x.filter((y) => y.id !== id)), 1800);
+    return () => clearTimeout(t);
+  }, [n]);
+  return (
+    <span className="stack-chips">
+      <Chips n={n} />
+      <AnimatePresence>
+        {drops.map((d) => (
+          <motion.span
+            key={d.id}
+            className="chip-drop"
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: -14 }}
+            exit={{ opacity: 0, y: -26 }}
+            transition={{ duration: 0.5 }}
+          >
+            {signed(d.v)}
+          </motion.span>
+        ))}
+      </AnimatePresence>
+    </span>
+  );
+}
