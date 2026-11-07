@@ -1,6 +1,6 @@
 // 対局（ゲームの連続プレイ）。rules.md 付録 B-0・B-1
 import { clone, type Rng } from './cards.ts';
-import { GameError, newGame, type GameState } from './game.ts';
+import { GameError, newGame, paidExtras, type GameState } from './game.ts';
 
 export interface MatchConfig {
   initialChips: number;
@@ -149,7 +149,7 @@ export function settleGame(m: MatchState): MatchState {
   // 持ち越しポット: 今のゲームの勝者が受け取り済み。このゲームで払われた料金が次へ
   const from: Record<string, number> = {};
   g.seats.forEach((s, i) => {
-    if (s.peekFee > 0) from[next.seatIds[i]!] = s.peekFee;
+    if (paidExtras(s) > 0) from[next.seatIds[i]!] = paidExtras(s);
   });
   next.carry = { amount: r.carryOut, from };
   next.gameNo++;

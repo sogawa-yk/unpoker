@@ -332,6 +332,15 @@
   background: var(--shu);
   color: #fff;
 }
+/* 追加めくりは金（お金を払った印）、AI 相談は白藍 */
+.tag.kin {
+  background: var(--kin);
+  color: #1b2f57;
+}
+.tag.ai {
+  background: var(--hakuai);
+  color: #1b2f57;
+}
 .seat-cards {
   display: flex;
   gap: 12px;

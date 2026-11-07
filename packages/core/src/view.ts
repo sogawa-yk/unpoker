@@ -1,6 +1,6 @@
 // 端末ごとに見てよい情報だけを取り出す（不正防止。architecture.md 3 章）
 import type { Card } from './cards.ts';
-import type { GameResult, GameState, Phase, Provisional } from './game.ts';
+import { advicePriceFor, type AdviceRecord, type AdviceTopic, type GameResult, type GameState, type Phase, type Provisional } from './game.ts';
 
 export type Viewer = { kind: 'table' } | { kind: 'seat'; seat: number };
 
@@ -11,6 +11,11 @@ export interface SeatView {
   challengeFee: number;
   /** 追加でめくった料金（枚数は peekedCount から分かる。中身は見せない） */
   peekFee: number;
+  /** AI 相談の料金の合計と、相談した判断（相談したことは全員に公開。B-6） */
+  adviceFee: number;
+  consulted: AdviceTopic[];
+  /** 相談の中身（自分の席だけ。他人の席は空） */
+  advice: AdviceRecord[];
   peekedCount: number;
   placed: boolean;
   arranged: boolean;
@@ -45,7 +50,9 @@ export interface GameView {
   result: GameResult | null;
   carryIn: number;
   peekPrice: number;
+  /** 追加めくりと AI 相談ができるか（規定数の最終ゲームではできない） */
   extraPeeks: boolean;
+  advicePrice: { placement: number; challenge: number };
 }
 
 const AFTER_REVEAL: Phase[] = ['ranking', 'declare', 'join', 'swap', 'result'];
@@ -68,7 +75,10 @@ export function viewFor(s: GameState, viewer: Viewer): GameView {
       stack: p.stack,
       baseBet: p.baseBet,
       challengeFee: p.challengeFee,
-      peekFee: p.peekFee,
+      peekFee: p.peekFee ?? 0,
+      adviceFee: p.adviceFee ?? 0,
+      consulted: (p.advice ?? []).map((a) => a.topic),
+      advice: mine ? (p.advice ?? []) : [],
       peekedCount: p.peeked.length,
       placed: p.boardIndex !== null,
       arranged: p.sets !== null,
@@ -120,5 +130,6 @@ export function viewFor(s: GameState, viewer: Viewer): GameView {
     carryIn: s.carryIn,
     peekPrice: s.peekPrice,
     extraPeeks: s.extraPeeks,
+    advicePrice: advicePriceFor(s.bet),
   };
 }

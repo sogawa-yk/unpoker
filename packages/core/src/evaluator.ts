@@ -111,8 +111,21 @@ export function bestSet(sets: readonly (readonly [Card, Card])[], board: readonl
   return { score, index };
 }
 
+/** nutScore の結果の控え（AI 相談で同じ場札を何度も調べるため。場札の並びには依存しない） */
+const nutCache = new Map<string, HandScore>();
+
 /** 場札 5 枚に対して、場以外の全カードから作れる最強の値（ナッツ判定用。B-4） */
 export function nutScore(board: readonly Card[]): HandScore {
+  const key = [...board].sort((x, y) => x - y).join(',');
+  const hit = nutCache.get(key);
+  if (hit !== undefined) return hit;
+  const v = nutScoreRaw(board);
+  if (nutCache.size > 5000) nutCache.clear();
+  nutCache.set(key, v);
+  return v;
+}
+
+function nutScoreRaw(board: readonly Card[]): HandScore {
   const used = new Set(board);
   const rest: Card[] = [];
   for (let c = 0; c < 52; c++) if (!used.has(c)) rest.push(c);

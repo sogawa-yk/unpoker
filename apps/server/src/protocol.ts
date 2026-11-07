@@ -11,6 +11,8 @@ export const GameActionMsg = z.discriminatedUnion('type', [
   z.object({ type: z.literal('flip'), index: z.number().int() }),
   z.object({ type: z.literal('declare'), yes: z.boolean() }),
   z.object({ type: z.literal('join'), yes: z.boolean() }),
+  /** AI に今の判断を相談する（料金は持ち越しポットへ。B-6） */
+  z.object({ type: z.literal('consult') }),
 ]);
 export type GameActionMsg = z.infer<typeof GameActionMsg>;
 

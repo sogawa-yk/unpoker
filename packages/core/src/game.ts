@@ -4,12 +4,27 @@ import { clone, fullDeck, shuffle, type Card, type Rng } from './cards.ts';
 import { bestSet, nutScore, type HandScore } from './evaluator.ts';
 import { distributeLayers } from './pots.ts';
 import { arrangeSets, chooseBoardIndex } from './strategy.ts';
+import { adviseChallenge, advisePlacement, type Advice, type ChallengeOutcome } from './advisor.ts';
 
 export const HAND_SIZE = 7;
 export const FREE_PEEKS = 3;
 
 /** 追加でめくる 1 枚の料金（rules.md B-5: 0.25B。端数は切り上げ） */
 export const peekPriceFor = (bet: number) => Math.ceil(bet / 4);
+
+/** AI 相談の料金（rules.md B-6: 配置 0.1B、チャレンジの判断 0.25B。端数は切り上げ） */
+export const advicePriceFor = (bet: number) => ({ placement: Math.ceil(bet / 10), challenge: Math.ceil(bet / 4) });
+
+export type AdviceTopic = 'place' | 'arrange' | 'declare' | 'join';
+
+/** 相談の記録。中身は相談した本人だけが見る */
+export interface AdviceRecord {
+  /** 同じ判断で二重に払わないための鍵（例: place は めくった枚数ごと） */
+  key: string;
+  topic: AdviceTopic;
+  fee: number;
+  advice: Advice;
+}
 
 export type Phase =
   | 'placement' // 3 枚めくる → 1 枚を場に出す → 3 セットを作る（全員同時）
@@ -29,6 +44,9 @@ export interface SeatState {
   challengeFee: number;
   /** 追加でめくった料金の合計（次のゲームの持ち越しポットに入る） */
   peekFee: number;
+  /** AI 相談の料金の合計（次のゲームの持ち越しポットに入る） */
+  adviceFee: number;
+  advice: AdviceRecord[];
   hand: Card[];
   /** めくった札の位置（めくった順） */
   peeked: number[];
@@ -106,6 +124,8 @@ export type GameAction =
   | { type: 'flip'; seat: number; index: number }
   | { type: 'declare'; seat: number; yes: boolean }
   | { type: 'join'; seat: number; yes: boolean }
+  /** AI に相談する（今の判断について。料金は持ち越しポットへ） */
+  | { type: 'consult'; seat: number }
   /** 演出フェーズを次へ進める（サーバーのタイマーが送る） */
   | { type: 'advance' }
   /** 持ち時間切れ。今のフェーズで操作が済んでいない席を自動で操作する */
@@ -139,6 +159,8 @@ export function newGame({ players, bet, dealer, carryIn = 0, extraPeeks = true }
       baseBet: base,
       challengeFee: 0,
       peekFee: 0,
+      adviceFee: 0,
+      advice: [],
       hand: deck.splice(0, HAND_SIZE),
       peeked: [],
       boardIndex: null,
@@ -218,6 +240,8 @@ export function apply(state: GameState, action: GameAction, rng: Rng): GameState
       p.sets = action.sets.map(([a, b]) => [a, b]);
       return afterPlacement(s);
     }
+    case 'consult':
+      return consult(s, action.seat, rng);
     case 'flip': {
       if (s.phase !== 'reveal') fail('公開フェーズではない');
       if (action.seat !== s.revealTurn) fail('自分の番ではない');
@@ -347,6 +371,98 @@ function doSwap(s: GameState, rng: Rng): GameState {
   return s;
 }
 
+/** 追加めくりと AI 相談に払った額（次のゲームの持ち越しポットへ。古い保存データには無い） */
+export const paidExtras = (p: SeatState) => (p.peekFee ?? 0) + (p.adviceFee ?? 0);
+
+/** 今この席が相談できる判断（相談できる場面でなければ null） */
+export function adviceTopic(s: GameState, seat: number): AdviceTopic | null {
+  const p = s.seats[seat];
+  if (!p) return null;
+  if (s.phase === 'placement' && p.sets === null) return p.peeked.length < FREE_PEEKS ? null : p.boardIndex === null ? 'place' : 'arrange';
+  if (s.phase === 'declare' && s.provisional!.lasts.includes(seat) && p.declare === null && p.stack > 0) return 'declare';
+  if (s.phase === 'join' && s.challenge!.optional.includes(seat) && p.join === null) return 'join';
+  return null;
+}
+
+const adviceKey = (s: GameState, seat: number, topic: AdviceTopic) =>
+  topic === 'place' ? `place:${s.seats[seat]!.peeked.length}` : topic;
+
+/** 同じ判断について、もう相談していればその記録 */
+export function currentAdvice(s: GameState, seat: number): AdviceRecord | null {
+  const topic = adviceTopic(s, seat);
+  if (!topic) return null;
+  const key = adviceKey(s, seat, topic);
+  return (s.seats[seat]!.advice ?? []).find((a) => a.key === key) ?? null;
+}
+
+function consult(s: GameState, seat: number, rng: Rng): GameState {
+  const p = seatOf(s, seat);
+  const topic = adviceTopic(s, seat) ?? fail('今は相談できる場面ではない');
+  if (!s.extraPeeks) fail('このゲームでは相談できない');
+  if (currentAdvice(s, seat)) fail('この判断はもう相談した');
+  const prices = advicePriceFor(s.bet);
+  const fee = topic === 'place' || topic === 'arrange' ? prices.placement : prices.challenge;
+  // チャレンジの判断は、払った後に参加費を出せる持ち点が残らないと意味がないので、料金より多く要る
+  if (topic === 'declare' || topic === 'join' ? p.stack <= fee : p.stack < fee) fail('持ち点が足りないので相談できない');
+  p.stack -= fee;
+  p.adviceFee = (p.adviceFee ?? 0) + fee;
+  let advice: Advice;
+  if (topic === 'place' || topic === 'arrange') {
+    advice = advisePlacement(
+      {
+        hand: p.hand,
+        peeked: p.peeked,
+        boardIndex: p.boardIndex,
+        initBoard: s.initialBoard,
+        players: s.seats.length,
+        withPeek: s.extraPeeks && p.stack >= s.peekPrice,
+      },
+      rng,
+    );
+  } else {
+    advice = adviseChallengeFor(s, seat, topic);
+  }
+  p.advice = [...(p.advice ?? []), { key: adviceKey(s, seat, topic), topic, fee, advice }];
+  return s;
+}
+
+/** チャレンジの相談: 公開済みの札だけから、入れ替えの全パターンを数え上げる（山札の順番は使わない） */
+function adviseChallengeFor(s: GameState, me: number, topic: 'declare' | 'join'): Advice {
+  const prov = s.provisional!;
+  const seen = new Set<Card>([...s.board, ...s.seats.flatMap((p) => setIndices(p).map((k) => p.hand[k]!))]);
+  const unseen = Array.from({ length: 52 }, (_, c) => c).filter((c) => !seen.has(c));
+  const deciders =
+    topic === 'declare'
+      ? s.seats.map((_, i) => i).filter((i) => i !== me && !prov.firsts.includes(i) && s.seats[i]!.stack > 0)
+      : s.challenge!.optional.filter((i) => i !== me);
+  const base = [...s.board];
+  const simulate = (meIn: boolean, others: number[]): ChallengeOutcome[] => {
+    const t = clone(s);
+    if (topic === 'declare') {
+      if (!meIn) {
+        const r = finish(t).result!;
+        return [{ stacks: r.stacks, winners: r.winners }];
+      }
+      payFee(t.seats[me]!, t.bet);
+      for (const i of prov.firsts) payFee(t.seats[i]!, t.bet);
+      t.challenge = { declarers: [me], forced: [...prov.firsts], optional: deciders, joiners: [], swap: null };
+    }
+    const joiners = [...others, ...(topic === 'join' && meIn ? [me] : [])];
+    for (const i of joiners) payFee(t.seats[i]!, t.bet);
+    t.challenge = { ...t.challenge!, joiners };
+    const outs: ChallengeOutcome[] = [];
+    for (let r = 0; r < base.length; r++)
+      for (const d of unseen) {
+        t.board = [...base];
+        t.board[r] = d;
+        const res = finish(t).result!;
+        outs.push({ stacks: res.stacks, winners: res.winners });
+      }
+    return outs;
+  };
+  return adviseChallenge(topic, me, s.seats[me]!.stack, deciders, simulate);
+}
+
 function finish(s: GameState): GameState {
   const n = s.seats.length;
   const ch = s.challenge;
@@ -393,7 +509,7 @@ function finish(s: GameState): GameState {
     });
     for (let i = 0; i < n; i++) stacks[i]! += nutPayout[i]! - nutPaid[i]!;
   }
-  const before = s.seats.map((p) => p.stack + p.baseBet + p.challengeFee + (p.peekFee ?? 0));
+  const before = s.seats.map((p) => p.stack + p.baseBet + p.challengeFee + paidExtras(p));
   s.result = {
     board: [...s.board],
     scores,
@@ -407,7 +523,7 @@ function finish(s: GameState): GameState {
     nutPayout,
     nutPaid,
     carryPayout,
-    carryOut: s.seats.reduce((a, p) => a + (p.peekFee ?? 0), 0),
+    carryOut: s.seats.reduce((a, p) => a + paidExtras(p), 0),
   };
   s.phase = 'result';
   return s;
