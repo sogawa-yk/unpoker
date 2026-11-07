@@ -15,6 +15,8 @@ const FAST = {
   boardRevealPerCard: 5,
   ranking: 10,
   swap: 10,
+  rouletteStart: 300,
+  rouletteStop: 300,
   bet: 300,
 };
 

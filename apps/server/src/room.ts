@@ -33,7 +33,11 @@ export interface Timing {
   boardRevealPerCard: number;
   /** 仮順位の発表演出 */
   ranking: number;
-  /** 場札入れ替えの演出 */
+  /** 宣言した人がルーレットを回すまでの持ち時間（勝負の顔ぶれの発表を含む） */
+  rouletteStart: number;
+  /** ルーレットを止めるまでの持ち時間 */
+  rouletteStop: number;
+  /** 止めてからの演出（減速して止まる、燃える、新しい札。画面側の演出は約 4.5 秒） */
   swap: number;
   /** 持ち回り方式で、親がベット額を選ぶ持ち時間 */
   bet: number;
@@ -47,7 +51,9 @@ export const DEFAULT_TIMING: Timing = {
   boardRevealBase: 1_500,
   boardRevealPerCard: 1_200,
   ranking: 5_000,
-  swap: 6_000,
+  rouletteStart: 15_000,
+  rouletteStop: 10_000,
+  swap: 7_000,
   bet: 30_000,
 };
 
@@ -325,7 +331,7 @@ export class Room {
       if (this.data.status !== 'playing') this.data.paused = false;
       return;
     }
-    const key = `${this.data.match!.gameNo}:${g.phase}:${g.phase === 'reveal' ? g.revealTurn : ''}`;
+    const key = `${this.data.match!.gameNo}:${g.phase}:${g.phase === 'reveal' ? g.revealTurn : g.phase === 'swap' ? (g.challenge?.roulette ?? '') : ''}`;
     const t = this.deps.timing;
     const hidden = g.seats.length; // 各自が出した伏せ札の枚数
     const [ms, isTimeout] = ((): [number, boolean] => {
@@ -342,8 +348,12 @@ export class Room {
           return [t.declare, true];
         case 'join':
           return [t.join, true];
-        case 'swap':
+        case 'swap': {
+          const r = g.challenge?.roulette;
+          if (r === 'ready') return [t.rouletteStart, true];
+          if (r === 'spinning') return [t.rouletteStop, true];
           return [t.swap, false];
+        }
       }
     })();
     this.setDeadline(key, ms, isTimeout);

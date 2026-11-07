@@ -77,6 +77,13 @@ export interface ChallengeState {
   optional: number[];
   joiners: number[];
   swap: { index: number; removed: Card; added: Card } | null;
+  /**
+   * 場札入れ替えのルーレット。宣言した人（roller）が回して止める。
+   * ready: 回すのを待つ → spinning: ストップを待つ → stopped: 入れ替える札が決まった（演出の後に結果へ）。
+   * どの札を入れ替えるかは、ストップを押した時点でランダムに決める（押す時機で結果は変わらない）。古い保存データには無い（stopped 扱い）
+   */
+  roulette?: 'ready' | 'spinning' | 'stopped';
+  roller?: number;
 }
 
 export interface GameResult {
@@ -127,6 +134,8 @@ export type GameAction =
   | { type: 'flip'; seat: number; index: number }
   | { type: 'declare'; seat: number; yes: boolean }
   | { type: 'join'; seat: number; yes: boolean }
+  /** 場札入れ替えのルーレットを回す・止める（宣言した人） */
+  | { type: 'roulette'; seat: number; cmd: 'start' | 'stop' }
   /** AI に相談する（今の判断について。料金は持ち越しポットへ） */
   | { type: 'consult'; seat: number }
   /** 演出フェーズを次へ進める（サーバーのタイマーが送る） */
@@ -245,6 +254,18 @@ export function apply(state: GameState, action: GameAction, rng: Rng): GameState
     }
     case 'consult':
       return consult(s, action.seat, rng);
+    case 'roulette': {
+      if (s.phase !== 'swap') fail('入れ替えの場面ではない');
+      const ch = s.challenge!;
+      if (action.seat !== ch.roller) fail('ルーレットを操作できるのはチャレンジを宣言した人だけ');
+      if (action.cmd === 'start') {
+        if (ch.roulette !== 'ready') fail('ルーレットはもう回っている');
+        ch.roulette = 'spinning';
+        return s;
+      }
+      if (ch.roulette !== 'spinning') fail('ルーレットが回っていない');
+      return doSwap(s, rng);
+    }
     case 'flip': {
       if (s.phase !== 'reveal') fail('公開フェーズではない');
       if (action.seat !== s.revealTurn) fail('自分の番ではない');
@@ -286,7 +307,10 @@ export function apply(state: GameState, action: GameAction, rng: Rng): GameState
         s.phase = 'declare';
         return s;
       }
-      if (s.phase === 'swap') return finish(s);
+      if (s.phase === 'swap') {
+        if (s.challenge?.roulette && s.challenge.roulette !== 'stopped') fail('ルーレットが止まっていない');
+        return finish(s);
+      }
       return fail(`このフェーズ（${s.phase}）は advance で進めない`);
     }
     case 'timeout':
@@ -351,7 +375,7 @@ function afterDeclare(s: GameState, rng: Rng): GameState {
     .map((_, i) => i)
     .filter((i) => !prov.firsts.includes(i) && !declarers.includes(i) && s.seats[i]!.stack > 0);
   s.challenge = { declarers, forced: [...prov.firsts], optional, joiners: [], swap: null };
-  if (optional.length === 0) return doSwap(s, rng);
+  if (optional.length === 0) return enterSwap(s);
   s.phase = 'join';
   return s;
 }
@@ -361,15 +385,26 @@ function afterJoin(s: GameState, rng: Rng): GameState {
   if (ch.optional.some((i) => s.seats[i]!.join === null)) return s;
   ch.joiners = ch.optional.filter((i) => s.seats[i]!.join === true);
   for (const i of ch.joiners) payFee(s.seats[i]!, s.bet);
-  return doSwap(s, rng);
+  return enterSwap(s);
 }
 
+/** 入れ替えの場面へ。ルーレットは宣言した人（同率で複数なら席順で先の人）が回す */
+function enterSwap(s: GameState): GameState {
+  const ch = s.challenge!;
+  ch.roller = ch.declarers[0]!;
+  ch.roulette = 'ready';
+  s.phase = 'swap';
+  return s;
+}
+
+/** ルーレットを止めたとき: 入れ替える場札をランダムに決める */
 function doSwap(s: GameState, rng: Rng): GameState {
   const index = Math.floor(rng() * 5);
   const added = s.deck.shift() ?? fail('山札がない');
   const removed = s.board[index]!;
   s.board[index] = added; // 除外した札は以降使わない
   s.challenge!.swap = { index, removed, added };
+  s.challenge!.roulette = 'stopped';
   s.phase = 'swap';
   return s;
 }
@@ -567,6 +602,13 @@ function timeout(s: GameState, rng: Rng): GameState {
       for (const i of cur.challenge!.optional)
         if (cur.seats[i]!.join === null) cur = apply(cur, { type: 'join', seat: i, yes: false }, rng);
       return cur;
+    case 'swap': {
+      // 宣言した人が回さなければ自動で回し、止めなければ自動で止める
+      const ch = cur.challenge!;
+      if (ch.roulette === 'ready') return apply(cur, { type: 'roulette', seat: ch.roller!, cmd: 'start' }, rng);
+      if (ch.roulette === 'spinning') return apply(cur, { type: 'roulette', seat: ch.roller!, cmd: 'stop' }, rng);
+      return fail('ルーレットは止まっている');
+    }
     default:
       return fail(`このフェーズ（${s.phase}）に持ち時間はない`);
   }
@@ -583,6 +625,10 @@ export function pendingSeats(s: GameState): number[] {
       return s.provisional!.lasts.filter((i) => s.seats[i]!.declare === null);
     case 'join':
       return s.challenge!.optional.filter((i) => s.seats[i]!.join === null);
+    case 'swap': {
+      const ch = s.challenge!;
+      return ch.roulette === 'ready' || ch.roulette === 'spinning' ? [ch.roller!] : [];
+    }
     default:
       return [];
   }

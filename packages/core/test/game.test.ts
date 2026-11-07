@@ -75,6 +75,8 @@ describe('ゲーム進行', () => {
     g = apply(g, { type: 'join', seat: 1, yes: true }, rng);
     g = apply(g, { type: 'join', seat: 2, yes: false }, rng);
     expect(g.phase).toBe('swap');
+    g = apply(g, { type: 'roulette', seat: 3, cmd: 'start' }, rng);
+    g = apply(g, { type: 'roulette', seat: 3, cmd: 'stop' }, rng);
     expect(g.challenge!.swap).toEqual({ index: 0, removed: parseCard('3c'), added: parseCard('2d') });
     g = apply(g, { type: 'advance' }, rng);
     const r = g.result!;
@@ -104,6 +106,8 @@ describe('ゲーム進行', () => {
     const last = g.provisional!.lasts[0]!;
     g = apply(g, { type: 'declare', seat: last, yes: true }, rng);
     if (g.phase === 'join') g = apply(g, { type: 'timeout' }, rng); // 便乗は時間切れで見送り
+    g = apply(g, { type: 'roulette', seat: last, cmd: 'start' }, rng);
+    g = apply(g, { type: 'roulette', seat: last, cmd: 'stop' }, rng);
     g = apply(g, { type: 'advance' }, rng);
     const r = g.result!;
     const nonPart = [0, 1, 2].filter((i) => !r.candidates.includes(i));
@@ -171,6 +175,7 @@ function playMatch(seed: number, n: number) {
 function randomAction(g: GameState, seat: number, rng: Rng): GameAction {
   const p = g.seats[seat]!;
   const pick = <T>(a: T[]) => a[Math.floor(rng() * a.length)]!;
+  if (g.phase === 'swap') return { type: 'roulette', seat, cmd: g.challenge!.roulette === 'ready' ? 'start' : 'stop' };
   switch (g.phase) {
     case 'placement': {
       if (p.peeked.length < 3) return { type: 'peek', seat, index: pick([...Array(HAND_SIZE).keys()].filter((k) => !p.peeked.includes(k))) };
@@ -347,5 +352,57 @@ describe('持ち回りベット（B-0）', () => {
     expect(() => validateConfig({ ...rot, maxBet: null })).not.toThrow();
     // 固定方式では持ち回りの値は見ない
     expect(() => validateConfig({ ...rot, betMode: 'fixed', betStep: 30 })).not.toThrow();
+  });
+});
+
+describe('場札入れ替えのルーレット（宣言した人が回して止める）', () => {
+  it('回す → 止める で入れ替える札が決まり、止めるまでは札を見せない', () => {
+    for (let seed = 1; seed < 200; seed++) {
+      const rng = seededRng(seed);
+      let g = newGame({ players: [0, 1, 2].map((i) => ({ id: `p${i}`, chips: 1000 })), bet: 100, dealer: 0 }, rng);
+      while (g.phase !== 'declare' && g.phase !== 'result') g = apply(g, pendingSeats(g).length ? { type: 'timeout' } : { type: 'advance' }, rng);
+      if (g.phase !== 'declare') continue;
+      const last = g.provisional!.lasts[0]!;
+      for (const i of g.provisional!.lasts) g = apply(g, { type: 'declare', seat: i, yes: i === last }, rng);
+      while (g.phase === 'join') g = apply(g, { type: 'timeout' }, rng);
+      expect(g.phase).toBe('swap');
+      const ch = g.challenge!;
+      expect(ch.roller).toBe(last);
+      expect(ch.roulette).toBe('ready');
+      expect(ch.swap).toBeNull();
+      expect(pendingSeats(g)).toEqual([last]);
+      const other = [0, 1, 2].find((i) => i !== last)!;
+      expect(() => apply(g, { type: 'roulette', seat: other, cmd: 'start' }, rng)).toThrow('宣言した人だけ');
+      expect(() => apply(g, { type: 'roulette', seat: last, cmd: 'stop' }, rng)).toThrow('回っていない');
+      expect(() => apply(g, { type: 'advance' }, rng)).toThrow('止まっていない');
+      g = apply(g, { type: 'roulette', seat: last, cmd: 'start' }, rng);
+      expect(g.challenge!.roulette).toBe('spinning');
+      // 回っている間も、入れ替える札は誰にも見えない
+      expect(viewFor(g, { kind: 'table' }).challenge!.swap).toBeNull();
+      g = apply(g, { type: 'roulette', seat: last, cmd: 'stop' }, rng);
+      expect(g.challenge!.roulette).toBe('stopped');
+      expect(g.challenge!.swap).not.toBeNull();
+      expect(pendingSeats(g)).toEqual([]);
+      g = apply(g, { type: 'advance' }, rng);
+      expect(g.phase).toBe('result');
+      return;
+    }
+    throw new Error('宣言フェーズにならない');
+  });
+
+  it('時間切れなら自動で回し、自動で止める', () => {
+    for (let seed = 1; seed < 200; seed++) {
+      const rng = seededRng(seed);
+      let g = newGame({ players: [0, 1, 2].map((i) => ({ id: `p${i}`, chips: 1000 })), bet: 100, dealer: 0 }, rng);
+      while (g.phase !== 'declare' && g.phase !== 'result') g = apply(g, pendingSeats(g).length ? { type: 'timeout' } : { type: 'advance' }, rng);
+      if (g.phase !== 'declare') continue;
+      for (const i of g.provisional!.lasts) g = apply(g, { type: 'declare', seat: i, yes: true }, rng);
+      while (g.phase === 'join') g = apply(g, { type: 'timeout' }, rng);
+      g = apply(g, { type: 'timeout' }, rng);
+      expect(g.challenge!.roulette).toBe('spinning');
+      g = apply(g, { type: 'timeout' }, rng);
+      expect(g.challenge!.roulette).toBe('stopped');
+      return;
+    }
   });
 });
