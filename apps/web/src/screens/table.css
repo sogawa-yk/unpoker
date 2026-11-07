@@ -150,18 +150,31 @@
   position: absolute;
   inset: 0;
 }
+/* 左上: ゲームの情報（縦に積んで、上の席にかからない幅に収める） */
 .game-head {
   position: absolute;
   top: max(12px, env(safe-area-inset-top));
   left: 18px;
+  max-width: calc(50% - 250px);
   display: flex;
-  gap: 18px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
   font-size: 14px;
+  line-height: 1.3;
   color: var(--hakuai);
   z-index: 2;
 }
-.game-head > span {
-  align-self: center;
+/* 右上: テーブルの操作（一時停止、音） */
+.game-ctrl {
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  right: 18px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  z-index: 2;
 }
 /* 持ち越しポット（勝者が基本ベットと一緒に受け取る）と、次へ回る分 */
 .carry {
@@ -571,4 +584,20 @@
   line-height: 1;
   color: var(--shu);
   font-variant-numeric: tabular-nums;
+}
+
+.lobby-hint.small {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+/* 小さめの iPad でも設定が画面に収まるよう、卓につく人は 2 列にし、それでも溢れたら右の列だけスクロール */
+.lobby-players {
+  grid-template-columns: 1fr 1fr;
+}
+.lobby-side {
+  max-height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }

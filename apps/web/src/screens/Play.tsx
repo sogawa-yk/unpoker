@@ -261,7 +261,7 @@ function PhoneBetting({ room, s }: { room: Room; s: RoomView }) {
               <HoldButton className="btn btn-shu btn-wide" ms={600} onDone={() => room.send({ t: 'bet', amount: v })}>
                 長押しで {v.toLocaleString()} に決めて配る
               </HoldButton>
-              <p className="paid-note">30 秒で決まらなければ、最低の {opts[0]!.toLocaleString()} になります</p>
+              {s.config.timeLimit !== false && <p className="paid-note">30 秒で決まらなければ、最低の {opts[0]!.toLocaleString()} になります</p>}
             </div>
           </>
         )}

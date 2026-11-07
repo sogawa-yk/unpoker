@@ -16,6 +16,8 @@ export interface MatchConfig {
   minBet?: number;
   maxBet?: number | null;
   betStep?: number;
+  /** 持ち時間（過ぎたら自動で操作して進める）を使うか。古い設定には無い（使う） */
+  timeLimit?: boolean;
 }
 
 export const DEFAULT_CONFIG: MatchConfig = {
@@ -26,6 +28,7 @@ export const DEFAULT_CONFIG: MatchConfig = {
   minBet: 100,
   maxBet: 500,
   betStep: 50,
+  timeLimit: true,
 };
 
 export const BET_STEPS = [10, 50, 100] as const;
