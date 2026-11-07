@@ -2,14 +2,33 @@
 import { clone, type Rng } from './cards.ts';
 import { GameError, newGame, paidExtras, type GameState } from './game.ts';
 
+export type BetMode = 'fixed' | 'rotating';
+
 export interface MatchConfig {
   initialChips: number;
+  /** 固定ベット額（ベット方式が固定のとき） */
   bet: number;
   /** 規定ゲーム数。null なら無制限 */
   maxGames: number | null;
+  /** ベット方式（rules.md B-0）。古い設定には無い（固定として扱う） */
+  betMode?: BetMode;
+  /** 持ち回り: 最低ベット、最高ベット（null は上限なし）、刻み幅 */
+  minBet?: number;
+  maxBet?: number | null;
+  betStep?: number;
 }
 
-export const DEFAULT_CONFIG: MatchConfig = { initialChips: 1000, bet: 100, maxGames: 10 };
+export const DEFAULT_CONFIG: MatchConfig = {
+  initialChips: 1000,
+  bet: 100,
+  maxGames: 10,
+  betMode: 'fixed',
+  minBet: 100,
+  maxBet: 500,
+  betStep: 50,
+};
+
+export const BET_STEPS = [10, 50, 100] as const;
 
 export interface MatchPlayer {
   id: string;
@@ -24,6 +43,8 @@ export interface GameRecord {
   winners: string[];
   nut: boolean;
   challenged: boolean;
+  /** このゲームのベット額 */
+  bet?: number;
   /** このゲームで勝者が受け取った持ち越しポット */
   carryIn?: number;
   /** このゲームで次へ持ち越した額 */
@@ -55,6 +76,8 @@ export interface MatchState {
   carry?: CarryPot;
   /** 対局の終了時に払い戻した持ち越しポット（プレイヤー ID → 額） */
   refund?: Record<string, number> | null;
+  /** 持ち回り方式で、親がベット額を選んでいる間（配る前） */
+  betting?: { dealerId: string } | null;
 }
 
 export function createMatch(config: MatchConfig, players: { id: string; name: string }[]): MatchState {
@@ -81,6 +104,16 @@ export function validateConfig(c: MatchConfig) {
     Number.isInteger(c.bet) && c.bet >= 10 && c.bet <= 1000 && c.bet % 10 === 0 &&
     (c.maxGames === null || (Number.isInteger(c.maxGames) && c.maxGames >= 1 && c.maxGames <= 50));
   if (!ok) throw new GameError('ルーム設定が範囲外');
+  if (c.betMode !== undefined && c.betMode !== 'fixed' && c.betMode !== 'rotating') throw new GameError('ベット方式が不正');
+  if (c.betMode === 'rotating') {
+    const min = c.minBet;
+    const max = c.maxBet;
+    const okR =
+      Number.isInteger(min) && min! >= 10 && min! <= 1000 && min! % 10 === 0 &&
+      (max === null || (Number.isInteger(max) && max! >= min! && max! <= 1000 && max! % 10 === 0)) &&
+      (BET_STEPS as readonly number[]).includes(c.betStep ?? -1);
+    if (!okR) throw new GameError('持ち回りベットの設定が範囲外');
+  }
 }
 
 const active = (m: MatchState) => m.players.filter((p) => p.chips > 0);
@@ -89,6 +122,7 @@ const active = (m: MatchState) => m.players.filter((p) => p.chips > 0);
 export function startGame(m: MatchState, rng: Rng): MatchState {
   if (m.finished) throw new GameError('対局は終了している');
   if (m.game && m.game.phase !== 'result') throw new GameError('ゲームの途中');
+  if (m.betting) throw new GameError('親がベット額を選んでいる');
   const next = clone(m);
   const act = active(next);
   if (act.length < 3 || (next.config.maxGames !== null && next.gameNo > next.config.maxGames)) return endMatch(next);
@@ -109,11 +143,48 @@ export function startGame(m: MatchState, rng: Rng): MatchState {
   }
   next.dealerId = dealer.id;
   next.seatIds = act.map((p) => p.id);
+  if (next.config.betMode === 'rotating') {
+    // 親がベット額を選ぶまで配らない
+    next.betting = { dealerId: dealer.id };
+    next.game = null;
+    return next;
+  }
+  return deal(next, next.config.bet, rng);
+}
+
+/** 持ち回り方式で、親が選べるベット額（最低ベット〜min(最高ベット, 親の持ち点) を刻み幅ごと） */
+export function betOptions(m: MatchState): number[] {
+  if (!m.betting) return [];
+  const c = m.config;
+  const min = c.minBet ?? c.bet;
+  const step = c.betStep ?? 10;
+  const chips = m.players.find((p) => p.id === m.betting!.dealerId)?.chips ?? 0;
+  const cap = Math.min(c.maxBet ?? Infinity, chips);
+  const out = [min];
+  for (let v = min + step; v <= cap; v += step) out.push(v);
+  return out;
+}
+
+/** 親がベット額を決めて配る。amount が null なら最低ベット（時間切れ） */
+export function chooseBet(m: MatchState, playerId: string | null, amount: number | null, rng: Rng): MatchState {
+  if (!m.betting) throw new GameError('ベット額を選ぶ場面ではない');
+  if (playerId !== null && playerId !== m.betting.dealerId) throw new GameError('ベット額を選べるのは親だけ');
+  const opts = betOptions(m);
+  const bet = amount ?? opts[0]!;
+  if (!opts.includes(bet)) throw new GameError('選べないベット額');
+  const next = clone(m);
+  next.betting = null;
+  return deal(next, bet, rng);
+}
+
+function deal(next: MatchState, bet: number, rng: Rng): MatchState {
+  const act = active(next);
+  const dealer = next.players.find((p) => p.id === next.dealerId)!;
   const isFinal = next.config.maxGames !== null && next.gameNo === next.config.maxGames;
   next.game = newGame(
     {
       players: act.map((p) => ({ id: p.id, chips: p.chips })),
-      bet: next.config.bet,
+      bet,
       dealer: act.indexOf(dealer),
       carryIn: next.carry?.amount ?? 0,
       extraPeeks: !isFinal,
@@ -143,6 +214,7 @@ export function settleGame(m: MatchState): MatchState {
     winners: r.winners.map((i) => next.seatIds[i]!),
     nut: r.nut,
     challenged: g.challenge !== null,
+    bet: g.bet,
     carryIn: g.carryIn,
     carryOut: r.carryOut,
   });

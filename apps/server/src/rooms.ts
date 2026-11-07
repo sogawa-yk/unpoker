@@ -159,6 +159,10 @@ export class Rooms {
         const r = this.requireTable(conn);
         return msg.paused ? r.pause() : r.unpause();
       }
+      case 'bet': {
+        if (conn.role !== 'player' || !conn.playerId) throw new RoomError('プレイヤーだけができる操作');
+        return this.room(conn).bet(conn.playerId, msg.amount);
+      }
       case 'action': {
         if (conn.role !== 'player' || !conn.playerId) throw new RoomError('プレイヤーだけができる操作');
         return this.room(conn).action(conn.playerId, msg.action);
