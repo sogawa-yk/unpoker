@@ -351,6 +351,15 @@ export class Room {
 
   /** 締め切りを付ける。同じ局面のままなら付け直さない（止めている間の持ち時間は満タンで止めておく） */
   private setDeadline(key: string, ms: number, isTimeout: boolean) {
+    if (isTimeout && this.data.config.timeLimit === false) {
+      // 持ち時間なしのルーム: 操作待ちは締め切りを付けず、全員が操作するまで待つ（演出の待ち時間はそのまま）
+      this.data.deadline = null;
+      this.data.pausedRemain = null;
+      this.data.deadlineMs = 0;
+      this.data.deadlineIsTimeout = true;
+      this.data.phaseKey = key;
+      return;
+    }
     if (key === this.data.phaseKey && (this.data.deadline !== null || this.data.pausedRemain != null)) return;
     this.data.deadlineMs = ms;
     this.data.deadlineIsTimeout = isTimeout;

@@ -24,6 +24,7 @@ export const ConfigMsg = z.object({
   minBet: z.number().int().optional(),
   maxBet: z.number().int().nullable().optional(),
   betStep: z.number().int().optional(),
+  timeLimit: z.boolean().optional(),
 });
 
 const roomId = z.string().regex(/^[A-Z2-9]{6}$/);

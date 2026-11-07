@@ -329,6 +329,27 @@ describe('サーバー', () => {
     expect(p.state!.game!.seats[seat]!.advice[1]!.advice).toBeTruthy();
   });
 
+  it('持ち時間なしのルームでは、操作待ちで時間切れにならず、演出は進む', async () => {
+    const { url } = await start();
+    const { table, players } = await setupRoom(url, ['待', 'つ', '人']);
+    players.forEach((p) => (p.idle = true));
+    table.send({ t: 'configure', config: { initialChips: 1000, bet: 100, maxGames: 5, timeLimit: false } });
+    await table.until(() => table.state!.config.timeLimit === false);
+    table.send({ t: 'start' });
+    await table.until(() => table.state!.game?.phase === 'placement');
+    expect(table.state!.deadline).toBeNull();
+    // 配置の持ち時間（1.5 秒）を過ぎても配置のまま
+    await new Promise((r) => setTimeout(r, 2000));
+    expect(table.state!.game!.phase).toBe('placement');
+    // 全員が操作すれば、演出（場札の公開）は締め切りで進む
+    players.forEach((p) => (p.idle = false));
+    await table.until(() => {
+      players.forEach(bot);
+      return table.state!.game!.phase === 'reveal';
+    }, 6000);
+    expect(table.state!.deadline).toBeNull();
+  });
+
   it('サーバーを再起動しても、保存した状態から続けられる', async () => {
     const store = new MemoryStore();
     const first = await start(store);

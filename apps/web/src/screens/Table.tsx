@@ -164,6 +164,15 @@ function Lobby({ room, s }: { room: Room; s: RoomView }) {
               />
             </>
           )}
+          <Segmented
+            label="持ち時間"
+            value={c.timeLimit === false ? 'off' : 'on'}
+            options={[
+              ['on', 'あり'],
+              ['off', 'なし'],
+            ]}
+            onChange={(v) => set({ timeLimit: v === 'on' })}
+          />
           <Stepper
             label="ゲーム数"
             value={c.maxGames ?? 0}
@@ -178,7 +187,16 @@ function Lobby({ room, s }: { room: Room; s: RoomView }) {
         <button className="btn btn-shu btn-wide start" disabled={n < 3} onClick={() => room.send({ t: 'start' })}>
           {n < 3 ? `あと ${3 - n} 人で始められます` : `${n} 人で対局を始める`}
         </button>
-        {rotating && <p className="lobby-hint">持ち回り: ゲームごとに親がスマホでベット額を決めます（30 秒で決まらなければ最低ベット）</p>}
+        {(rotating || c.timeLimit === false) && (
+          <p className="lobby-hint small">
+            {[
+              rotating && `持ち回り: 親がゲームごとにスマホでベット額を決めます${c.timeLimit === false ? '' : '（30 秒で最低ベット）'}`,
+              c.timeLimit === false && '持ち時間なし: 時間切れで進めず、全員の操作を待ちます',
+            ]
+              .filter(Boolean)
+              .join('。')}
+          </p>
+        )}
       </section>
     </div>
   );
@@ -272,9 +290,11 @@ function TableGame({ room, s, g }: { room: Room; s: RoomView; g: GameView }) {
             次へ <Chips n={nextCarry} />
           </span>
         )}
-        {g.phase !== 'result' && <PauseButton room={room} s={s} />}
-        <SoundButton />
       </header>
+      <div className="game-ctrl">
+        {g.phase !== 'result' && s.config.timeLimit !== false && <PauseButton room={room} s={s} />}
+        <SoundButton />
+      </div>
       <div className="arena">
         {g.seats.map((sv, i) => (
           <SeatPanel key={sv.id} g={g} seat={i} sv={sv} name={names[i]!} side={sides[i]!} swapDone={swapDone.done} odds={odds?.[i] ?? null} />
@@ -376,9 +396,11 @@ function TableBetting({ room, s }: { room: Room; s: RoomView }) {
         <span>
           {s.gameNo} ゲーム目{s.config.maxGames ? ` ／ ${s.config.maxGames}` : ''}
         </span>
-        <PauseButton room={room} s={s} />
-        <SoundButton />
       </header>
+      <div className="game-ctrl">
+        {s.config.timeLimit !== false && <PauseButton room={room} s={s} />}
+        <SoundButton />
+      </div>
       <div className="betting">
         <span className="dealer big" aria-hidden="true">
           親
