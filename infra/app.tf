@@ -51,6 +51,9 @@ resource "oci_container_instances_container_instance" "app" {
       NOSQL_REGION      = var.region
       NOSQL_COMPARTMENT = var.compartment_ocid
       NOSQL_AUTH        = "resource_principal"
+      # AI 相談の説明文（OCI Generative AI。リージョンとコンパートメントは NOSQL_* と同じ）
+      GENAI       = var.genai_model == "" ? "off" : "on"
+      GENAI_MODEL = var.genai_model
     }
   }
   vnics {

@@ -8,6 +8,7 @@ import { AdvicePanel, adviceNow, arrangePlan } from '../components/Advice.tsx';
 import { Chips, ConnBadge, Gauge, HoldButton, PaidButton, StackChips, signed, Toast } from '../components/bits.tsx';
 import { provisionalRank } from '../game.ts';
 import { savedToken, useRoom, type Room, type RoomView } from '../net.ts';
+import { sfx } from '../sound.ts';
 import './play.css';
 
 export function PlayScreen({ roomId }: { roomId: string }) {
@@ -123,6 +124,26 @@ function PhoneGame({ room, s }: { room: Room; s: RoomView }) {
   }
   const me = g.seats[g.you]!;
   const name = (i: number) => s.players.find((p) => p.id === g.seats[i]?.id)?.name ?? '？';
+  return <PhoneGameBody room={room} s={s} g={g} me={me} name={name} sentAt={sentAt} />;
+}
+
+function PhoneGameBody({
+  room,
+  s,
+  g,
+  me,
+  name,
+  sentAt,
+}: {
+  room: Room;
+  s: RoomView;
+  g: GameView;
+  me: SeatView;
+  name: (i: number) => string;
+  sentAt: React.MutableRefObject<{ key: number; at: number }>;
+}) {
+  usePhoneSounds(s.gameNo, me);
+  const you = g.you!;
   const act = (a: GameActionMsg) => {
     // 拒否されたときに押し直せるよう、1.5 秒たてば同じ状態でも送れる
     if (sentAt.current.key === s.serverTime && Date.now() - sentAt.current.at < 1500) return;
@@ -132,9 +153,9 @@ function PhoneGame({ room, s }: { room: Room; s: RoomView }) {
   return (
     <div className="pg">
       <header className="pg-head">
-        <span className="pg-name">{name(g.you)}</span>
-        {g.dealer === g.you && <span className="dealer">親</span>}
-        <StackChips n={g.result ? g.result.stacks[g.you]! : me.stack} />
+        <span className="pg-name">{name(you)}</span>
+        {g.dealer === you && <span className="dealer">親</span>}
+        <StackChips n={g.result ? g.result.stacks[you]! : me.stack} />
         {me.peekFee + me.adviceFee > 0 && (
           <span className="paid-pill" title="追加めくりと AI 相談に払った額。次のゲームの持ち越しポットに入ります">
             <i className="coin" aria-hidden="true" />
@@ -153,6 +174,19 @@ function PhoneGame({ room, s }: { room: Room; s: RoomView }) {
       </main>
     </div>
   );
+}
+
+/** 手札の効果音: 自分がめくったときと、お金を払ったとき（小判） */
+function usePhoneSounds(gameNo: number, me: SeatView) {
+  const prev = useRef<{ gameNo: number; peeked: number; revealed: number; paid: number } | null>(null);
+  useEffect(() => {
+    const cur = { gameNo, peeked: me.peekedCount, revealed: me.revealed.length, paid: me.peekFee + me.adviceFee };
+    const p = prev.current;
+    prev.current = cur;
+    if (!p || p.gameNo !== gameNo) return;
+    if (cur.paid > p.paid) sfx.coin();
+    if (cur.peeked > p.peeked || cur.revealed > p.revealed) sfx.flip();
+  });
 }
 
 /** 持ち回り方式: 親はベット額を選び、ほかの人は待つ（B-0） */

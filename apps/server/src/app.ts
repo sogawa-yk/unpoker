@@ -30,6 +30,7 @@ export interface AppOptions {
   /** ビルド済みの画面（apps/web/dist）。無ければ静的配信はしない */
   webRoot?: string | null;
   log?: RoomDeps['log'];
+  explainer?: RoomDeps['explainer'];
 }
 
 export async function createApp(opts: AppOptions = {}) {
@@ -39,6 +40,7 @@ export async function createApp(opts: AppOptions = {}) {
     rng: cryptoRng,
     now: () => Date.now(),
     log: opts.log,
+    explainer: opts.explainer,
   };
   const rooms = new Rooms(deps);
   await rooms.load();

@@ -5,11 +5,14 @@
 //   STORE_DIR     … STORE=file のときの保存先（既定 .data/rooms）
 //   NOSQL_TABLE / NOSQL_REGION / NOSQL_COMPARTMENT … STORE=nosql のとき
 //   NOSQL_AUTH    … resource_principal（既定。Container Instances 上）| config（手元。OCI_PROFILE のプロファイル）
+//   GENAI         … on で AI 相談に説明文を付ける（OCI Generative AI）。GENAI_MODEL / GENAI_REGION / GENAI_COMPARTMENT / GENAI_AUTH
+//                   リージョンとコンパートメントの既定は NOSQL_* と同じ、認証の既定は resource_principal
 import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createApp } from './app.ts';
 import { FileStore, MemoryStore, NoSqlStore, type RoomStore } from './store.ts';
+import { OciExplainer } from './explain.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.PORT ?? 8080);
@@ -32,8 +35,19 @@ const store: RoomStore =
 const log = (msg: string, extra: Record<string, unknown> = {}) =>
   console.log(JSON.stringify({ time: new Date().toISOString(), msg, ...extra }));
 
-const app = await createApp({ store, webRoot, log });
-app.server.listen(port, () => log('listening', { port, webRoot, store: process.env.STORE ?? 'memory' }));
+const explainer =
+  process.env.GENAI === 'on'
+    ? new OciExplainer({
+        region: process.env.GENAI_REGION ?? env('NOSQL_REGION'),
+        compartment: process.env.GENAI_COMPARTMENT ?? env('NOSQL_COMPARTMENT'),
+        model: process.env.GENAI_MODEL ?? 'openai.gpt-5.4-mini',
+        auth: process.env.GENAI_AUTH === 'config' ? 'config' : 'resource_principal',
+        profile: process.env.OCI_PROFILE,
+      })
+    : undefined;
+
+const app = await createApp({ store, webRoot, log, explainer });
+app.server.listen(port, () => log('listening', { port, webRoot, store: process.env.STORE ?? 'memory', genai: explainer ? 'on' : 'off' }));
 
 const shutdown = async (signal: string) => {
   log('shutting down', { signal });

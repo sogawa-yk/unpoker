@@ -3,6 +3,7 @@ import type { AddressInfo } from 'node:net';
 import WebSocket from 'ws';
 import { createApp } from '../src/app.ts';
 import { MemoryStore } from '../src/store.ts';
+import type { Explainer } from '../src/explain.ts';
 import type { RoomView, ServerMsg } from '../src/protocol.ts';
 
 const FAST = {
@@ -23,8 +24,8 @@ afterEach(async () => {
   await Promise.all(apps.splice(0).map((a) => a.close()));
 });
 
-async function start(store = new MemoryStore()) {
-  const app = await createApp({ store, timing: FAST });
+async function start(store = new MemoryStore(), explainer?: Explainer) {
+  const app = await createApp({ store, timing: FAST, explainer });
   apps.push(app);
   await new Promise<void>((r) => app.server.listen(0, r));
   const port = (app.server.address() as AddressInfo).port;
@@ -288,6 +289,44 @@ describe('サーバー', () => {
     table.send({ t: 'start' });
     await table.until(() => table.state!.betting);
     await table.until(() => table.state!.game?.bet === 50, 4000);
+  });
+
+  it('AI 相談の説明文: 数字の後に本人だけへ届き、失敗しても数字は残る', async () => {
+    const prompts: string[] = [];
+    let fail = false;
+    const { url } = await start(new MemoryStore(), {
+      explain: async (_sys: string, user: string) => {
+        prompts.push(user);
+        await new Promise((r) => setTimeout(r, 50));
+        if (fail) throw new Error('boom');
+        return '説明です';
+      },
+    });
+    const { table, players } = await setupRoom(url, ['説', '明', '文']);
+    players.forEach((p) => (p.idle = true));
+    table.send({ t: 'start' });
+    const p = players[0]!;
+    await p.until(() => p.state!.game?.phase === 'placement');
+    table.send({ t: 'pause', paused: true });
+    const seat = p.state!.game!.you!;
+    for (const index of [0, 1, 2]) p.send({ t: 'action', action: { type: 'peek', index } });
+    await p.until(() => p.state!.game!.seats[seat]!.peekedCount === 3);
+    p.send({ t: 'action', action: { type: 'consult' } });
+    await p.until(() => p.state!.game!.seats[seat]!.advice[0]?.explanation === '説明です');
+    expect(JSON.stringify(players[1]!.state)).not.toContain('説明です');
+    expect(JSON.stringify(table.state)).not.toContain('説明です');
+    // 説明を頼む文面に、本人が知らない他人の札を入れない
+    const others = table.state!.game!.seats.filter((_, i) => i !== seat);
+    expect(others.length).toBeGreaterThan(0);
+    expect(prompts[0]).toContain('自分がめくって中身を知っている札');
+    // 失敗したら説明文は null（数字の答えはそのまま）
+    fail = true;
+    p.send({ t: 'action', action: { type: 'place', index: p.state!.game!.seats[seat]!.known[0]! } });
+    await p.until(() => p.state!.game!.seats[seat]!.placed);
+    p.send({ t: 'action', action: { type: 'consult' } });
+    await p.until(() => p.state!.game!.seats[seat]!.advice[1]?.explaining === false);
+    expect(p.state!.game!.seats[seat]!.advice[1]!.explanation).toBeNull();
+    expect(p.state!.game!.seats[seat]!.advice[1]!.advice).toBeTruthy();
   });
 
   it('サーバーを再起動しても、保存した状態から続けられる', async () => {

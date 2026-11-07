@@ -20,8 +20,33 @@ export function savedToken(roomId: string, role: Role): string | null {
 export function saveToken(roomId: string, role: Role, token: string) {
   try {
     localStorage.setItem(key(roomId, role), token);
+    if (!asParam()) rememberRoom(roomId, role);
   } catch {
     /* プライベートブラウズなど。再接続はできないが遊べる */
+  }
+}
+
+/** 最近遊んだルーム（ホーム画面のアイコンから開いたときに、続きへ戻れるように。ルームは 24 時間で消える） */
+export interface RecentRoom {
+  roomId: string;
+  role: Role;
+  at: number;
+}
+const RECENT_KEY = 'unpoker:recent';
+const DAY = 24 * 60 * 60 * 1000;
+
+function rememberRoom(roomId: string, role: Role) {
+  const list = recentRooms().filter((r) => !(r.roomId === roomId && r.role === role));
+  list.unshift({ roomId, role, at: Date.now() });
+  localStorage.setItem(RECENT_KEY, JSON.stringify(list.slice(0, 5)));
+}
+
+export function recentRooms(): RecentRoom[] {
+  try {
+    const list = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]') as RecentRoom[];
+    return list.filter((r) => Date.now() - r.at < DAY && localStorage.getItem(`unpoker:${r.roomId}:${r.role}`) !== null);
+  } catch {
+    return [];
   }
 }
 export function forgetToken(roomId: string, role: Role) {
