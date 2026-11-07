@@ -138,10 +138,11 @@ sim/            … 既存のシミュレーター（core ができたら core �
 - 本番 URL で 3 人（ボット）の 1 ゲームを、配置から結果まで通せた。ルームは NoSQL に保存される
 - 実機（iPad と iPhone の Safari）での操作感、QR からの参加、スリープからの復帰はいずれも問題なし（ユーザー確認）
 - 大阪の Generative AI で `openai.gpt-5.4-mini` を手元のプロファイルから呼べる（説明文 1 回 1.2〜2.6 秒）
+- Container Instance から Generative AI を、リソース・プリンシパルとサービス・ゲートウェイ経由で呼べる（NAT ゲートウェイは不要。本番で相談から説明文まで約 3 秒）
+- 実機での service worker の登録と、効果音の聞こえ方は未確認（アプリ内のブラウザでは service worker を登録できなかった）
 
 まだ確かめていないこと（いずれも今の構成には影響しない）:
 
 - API Gateway が WebSocket に対応しているか（使っていない）
 - Cloudflare のアイドルタイムアウトの正確な値（25 秒 ping で足りている）
-- Container Instance から Generative AI をリソース・プリンシパルで、サービス・ゲートウェイ経由で呼べるか（説明文を反映するときに確かめる）
 - `restart` で新しいイメージを取り直すか（今はタグを変えて作り直している）
