@@ -24,6 +24,17 @@ export interface GameRecord {
   winners: string[];
   nut: boolean;
   challenged: boolean;
+  /** このゲームで勝者が受け取った持ち越しポット */
+  carryIn?: number;
+  /** このゲームで次へ持ち越した額 */
+  carryOut?: number;
+}
+
+/** 次のゲームへ持ち越すポット。対局が終わって受け取る人がいなければ、払った人へ返す */
+export interface CarryPot {
+  amount: number;
+  /** 払った人ごとの額（プレイヤー ID → 額） */
+  from: Record<string, number>;
 }
 
 export interface MatchState {
@@ -40,6 +51,10 @@ export interface MatchState {
   finished: boolean;
   /** 終了時の順位（持ち点の多い順） */
   ranking: string[] | null;
+  /** 次のゲームの持ち越しポット（古い保存データには無い） */
+  carry?: CarryPot;
+  /** 対局の終了時に払い戻した持ち越しポット（プレイヤー ID → 額） */
+  refund?: Record<string, number> | null;
 }
 
 export function createMatch(config: MatchConfig, players: { id: string; name: string }[]): MatchState {
@@ -55,6 +70,8 @@ export function createMatch(config: MatchConfig, players: { id: string; name: st
     history: [],
     finished: false,
     ranking: null,
+    carry: { amount: 0, from: {} },
+    refund: null,
   };
 }
 
@@ -92,10 +109,18 @@ export function startGame(m: MatchState, rng: Rng): MatchState {
   }
   next.dealerId = dealer.id;
   next.seatIds = act.map((p) => p.id);
+  const isFinal = next.config.maxGames !== null && next.gameNo === next.config.maxGames;
   next.game = newGame(
-    { players: act.map((p) => ({ id: p.id, chips: p.chips })), bet: next.config.bet, dealer: act.indexOf(dealer) },
+    {
+      players: act.map((p) => ({ id: p.id, chips: p.chips })),
+      bet: next.config.bet,
+      dealer: act.indexOf(dealer),
+      carryIn: next.carry?.amount ?? 0,
+      extraPeeks: !isFinal,
+    },
     rng,
   );
+  next.carry = { amount: 0, from: {} }; // 受け取りはこのゲームの勝者に任せた
   return next;
 }
 
@@ -118,7 +143,15 @@ export function settleGame(m: MatchState): MatchState {
     winners: r.winners.map((i) => next.seatIds[i]!),
     nut: r.nut,
     challenged: g.challenge !== null,
+    carryIn: g.carryIn,
+    carryOut: r.carryOut,
   });
+  // 持ち越しポット: 今のゲームの勝者が受け取り済み。このゲームで払われた料金が次へ
+  const from: Record<string, number> = {};
+  g.seats.forEach((s, i) => {
+    if (s.peekFee > 0) from[next.seatIds[i]!] = s.peekFee;
+  });
+  next.carry = { amount: r.carryOut, from };
   next.gameNo++;
   next.game = null;
   const act = active(next);
@@ -129,6 +162,15 @@ export function settleGame(m: MatchState): MatchState {
 function endMatch(m: MatchState): MatchState {
   m.finished = true;
   m.game = null;
+  // 受け取る次のゲームがないので、持ち越しポットは払った人へ返す
+  if (m.carry && m.carry.amount > 0) {
+    for (const [id, v] of Object.entries(m.carry.from)) {
+      const p = m.players.find((x) => x.id === id);
+      if (p) p.chips += v;
+    }
+    m.refund = { ...m.carry.from };
+    m.carry = { amount: 0, from: {} };
+  }
   m.ranking = [...m.players].sort((a, b) => b.chips - a.chips).map((p) => p.id);
   return m;
 }

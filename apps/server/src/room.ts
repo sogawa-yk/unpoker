@@ -374,6 +374,7 @@ export class Room {
       deadline: d.deadline,
       deadlineMs: d.deadlineMs,
       deadlineIsTimeout: d.deadlineIsTimeout,
+      refund: m?.refund ?? null,
       paused: !!d.paused,
       pausedRemain: d.pausedRemain ?? null,
       serverTime: this.deps.now(),

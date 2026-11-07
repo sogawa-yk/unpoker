@@ -160,17 +160,32 @@ const ALL = [0, 1, 2, 3, 4, 5, 6];
 
 function Placement({ g, me, act }: { g: GameView; me: SeatView; act: (a: GameActionMsg) => void }) {
   const [sel, setSel] = useState<number | null>(null);
+  /** 追加でめくろうとしている札（料金がかかるので、長押しで確定する） */
+  const [buy, setBuy] = useState<number | null>(null);
   const boardKnown = g.board.filter((c): c is CardT => c !== null);
   if (me.arranged) return <MySets g={g} me={me} hint="配置しました。他の人を待っています" />;
   if (me.placed) return <Arrange me={me} act={act} />;
 
   const peeking = me.peekedCount < 3;
+  const price = g.peekPrice;
+  const canBuy = !peeking && g.extraPeeks && me.stack >= price;
+  const extra = Math.max(0, me.peekedCount - 3);
+  const buyNote = !g.extraPeeks
+    ? '最終ゲームなので、追加ではめくれません'
+    : me.stack < price
+      ? '持ち点が足りないので、追加ではめくれません'
+      : `伏せた札は 1 枚 ${price} 点で追加でめくれます。料金は次のゲームの持ち越しポットに入ります`;
   return (
     <>
       <Instruction
         main={peeking ? `めくる札を選ぶ（あと ${3 - me.peekedCount} 枚）` : '場に出す札を選ぶ'}
-        sub={peeking ? '中身は誰にも見えません' : '選んだ札を上にはじくと、場に出ます。場の札は全員が使えます'}
+        sub={peeking ? '中身は誰にも見えません' : `選んだ札を上にはじくと、場に出ます。${buyNote}`}
       />
+      {extra > 0 && (
+        <p className="pg-note">
+          追加で {extra} 枚めくりました（{extra * price} 点）。めくった枚数は iPad に出ます
+        </p>
+      )}
       {boardKnown.length > 0 && <MiniBoard cards={boardKnown} label="場札" />}
       <div className="hand7">
         {ALL.map((k) => {
@@ -178,16 +193,34 @@ function Placement({ g, me, act }: { g: GameView; me: SeatView; act: (a: GameAct
           const card = me.cards[k] ?? null;
           const selectable = !peeking && known;
           const isSel = sel === k;
+          const isBuy = buy === k;
+          const onClick = peeking
+            ? known
+              ? undefined
+              : () => act({ type: 'peek', index: k })
+            : selectable
+              ? () => {
+                  setSel(isSel ? null : k);
+                  setBuy(null);
+                }
+              : canBuy
+                ? () => {
+                    setBuy(isBuy ? null : k);
+                    setSel(null);
+                  }
+                : undefined;
           const node = (
             <Card
               card={card}
               faceUp={known && card !== null}
               width={76}
-              selected={isSel}
-              dim={!peeking && !known}
-              onClick={peeking ? (known ? undefined : () => act({ type: 'peek', index: k })) : selectable ? () => setSel(isSel ? null : k) : undefined}
-              label={known ? undefined : peeking ? 'めくる' : '伏せ札'}
-            />
+              selected={isSel || isBuy}
+              dim={!peeking && !known && !canBuy}
+              onClick={onClick}
+              label={known ? undefined : peeking ? 'めくる' : canBuy ? `${price} 点で追加でめくる` : '伏せ札'}
+            >
+              {!known && canBuy && <span className="price-tag">{price}</span>}
+            </Card>
           );
           if (!isSel) return <div key={k}>{node}</div>;
           return (
@@ -208,7 +241,18 @@ function Placement({ g, me, act }: { g: GameView; me: SeatView; act: (a: GameAct
         })}
       </div>
       <div className="pg-actions">
-        {!peeking && (
+        {!peeking && buy !== null && (
+          <HoldButton
+            className="btn btn-wide btn-buy"
+            onDone={() => {
+              act({ type: 'peek', index: buy });
+              setBuy(null);
+            }}
+          >
+            長押しで {price} 点払ってめくる
+          </HoldButton>
+        )}
+        {!peeking && buy === null && (
           <button className="btn btn-wide" disabled={sel === null} onClick={() => sel !== null && act({ type: 'place', index: sel })}>
             この札を場に出す
           </button>

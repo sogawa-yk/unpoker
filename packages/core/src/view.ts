@@ -9,6 +9,8 @@ export interface SeatView {
   stack: number;
   baseBet: number;
   challengeFee: number;
+  /** 追加でめくった料金（枚数は peekedCount から分かる。中身は見せない） */
+  peekFee: number;
   peekedCount: number;
   placed: boolean;
   arranged: boolean;
@@ -42,6 +44,8 @@ export interface GameView {
   challenge: GameState['challenge'];
   result: GameResult | null;
   carryIn: number;
+  peekPrice: number;
+  extraPeeks: boolean;
 }
 
 const AFTER_REVEAL: Phase[] = ['ranking', 'declare', 'join', 'swap', 'result'];
@@ -64,6 +68,7 @@ export function viewFor(s: GameState, viewer: Viewer): GameView {
       stack: p.stack,
       baseBet: p.baseBet,
       challengeFee: p.challengeFee,
+      peekFee: p.peekFee,
       peekedCount: p.peeked.length,
       placed: p.boardIndex !== null,
       arranged: p.sets !== null,
@@ -113,5 +118,7 @@ export function viewFor(s: GameState, viewer: Viewer): GameView {
     challenge: s.challenge,
     result: s.result,
     carryIn: s.carryIn,
+    peekPrice: s.peekPrice,
+    extraPeeks: s.extraPeeks,
   };
 }

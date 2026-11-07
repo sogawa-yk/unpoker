@@ -178,6 +178,7 @@ function TableGame({ room, s, g }: { room: Room; s: RoomView; g: GameView }) {
   const names = g.seats.map((sv) => s.players.find((p) => p.id === sv.id)?.name ?? '？');
   const sides = SIDES[g.seats.length] ?? SIDES[4]!;
   const swapDone = useSwapAnimation(g, s.gameNo);
+  const nextCarry = g.seats.reduce((a, x) => a + x.peekFee, 0);
   // 公開フェーズの見込み: テーブルに見えている札（場札とめくれた札）だけから計算する
   const visibleKey = g.phase === 'reveal' ? JSON.stringify([g.board, g.seats.map((x) => x.cards)]) : '';
   const odds = useMemo(() => {
@@ -196,6 +197,16 @@ function TableGame({ room, s, g }: { room: Room; s: RoomView; g: GameView }) {
         <span>
           ベット <Chips n={g.bet} />
         </span>
+        {g.carryIn > 0 && (
+          <span className="carry" title="このゲームの勝者が受け取る">
+            持ち越しポット <Chips n={g.carryIn} />
+          </span>
+        )}
+        {nextCarry > 0 && (
+          <span className="carry next" title="追加めくりの料金。次のゲームの勝者が受け取る">
+            次へ <Chips n={nextCarry} />
+          </span>
+        )}
         {g.phase !== 'result' && (
           <button
             type="button"
@@ -395,7 +406,7 @@ function SeatPanel({ g, seat, sv, name, side, swapDone, odds }: { g: GameView; s
     if (g.phase === 'placement') {
       if (sv.arranged) return '配置完了';
       if (sv.placed) return '組を作っています';
-      return `めくった札 ${sv.peekedCount} / 3`;
+      return sv.peekedCount > 3 ? `めくった札 3 ＋ 追加 ${sv.peekedCount - 3}` : `めくった札 ${sv.peekedCount} / 3`;
     }
     if (g.phase === 'declare' && isLast) return sv.declareDone ? '決めました' : '考え中…';
     if (g.phase === 'join' && ch?.optional.includes(seat)) return sv.joinDone ? '決めました' : '考え中…';
@@ -405,6 +416,7 @@ function SeatPanel({ g, seat, sv, name, side, swapDone, odds }: { g: GameView; s
   if (ch?.declarers.includes(seat)) tags.push('挑戦');
   if (ch?.forced.includes(seat)) tags.push('受けて立つ');
   if (ch?.joiners.includes(seat)) tags.push('便乗');
+  if (sv.peekedCount > 3) tags.push(`追加めくり ${sv.peekedCount - 3}`);
 
   return (
     <div className={`seat side-${side}${spotlight ? ' spot' : ''}${out ? ' out' : ''}${winner ? ' winner' : ''}`}>
@@ -512,6 +524,15 @@ function Finished({ s, navigate }: { s: RoomView; navigate: (p: string) => void 
         ))}
       </ol>
       <p className="muted">{s.history.length} ゲーム遊びました</p>
+      {s.refund && Object.keys(s.refund).length > 0 && (
+        <p className="muted">
+          受け取る人がいなかった持ち越しポットは、払った人へ返しました（
+          {Object.entries(s.refund)
+            .map(([id, v]) => `${s.players.find((p) => p.id === id)?.name ?? '?'} ${v}`)
+            .join('、')}
+          ）
+        </p>
+      )}
       <button className="btn" onClick={() => navigate('/table')}>
         新しい対局を始める
       </button>
