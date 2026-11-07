@@ -1,6 +1,8 @@
 // 1 ルームの状態と進行。ゲームの規則は @unpoker/core に任せ、ここでは参加者・接続・タイマー・保存を扱う
 import {
   apply,
+  betOptions,
+  chooseBet,
   createMatch,
   DEFAULT_CONFIG,
   GameError,
@@ -32,6 +34,8 @@ export interface Timing {
   ranking: number;
   /** 場札入れ替えの演出 */
   swap: number;
+  /** 持ち回り方式で、親がベット額を選ぶ持ち時間 */
+  bet: number;
 }
 
 export const DEFAULT_TIMING: Timing = {
@@ -43,6 +47,7 @@ export const DEFAULT_TIMING: Timing = {
   boardRevealPerCard: 1_200,
   ranking: 5_000,
   swap: 6_000,
+  bet: 30_000,
 };
 
 export interface RoomPlayer {
@@ -236,6 +241,19 @@ export class Room {
 
   // ---- プレイヤーの操作 ----
 
+  /** 持ち回り方式で、親がベット額を決めて配る */
+  bet(playerId: string, amount: number) {
+    const m = this.data.match;
+    if (this.data.status !== 'playing' || !m?.betting) throw new RoomError('ベット額を選ぶ場面ではない');
+    try {
+      this.data.match = chooseBet(m, playerId, amount, this.deps.rng);
+    } catch (e) {
+      if (e instanceof GameError) throw new RoomError(e.message, 'rule');
+      throw e;
+    }
+    this.commit();
+  }
+
   action(playerId: string, msg: GameActionMsg) {
     const m = this.data.match;
     if (this.data.status !== 'playing' || !m?.game) throw new RoomError('ゲーム中ではない');
@@ -261,6 +279,10 @@ export class Room {
   /** 局面に応じた締め切りを決める。同じ局面のままなら締め切りは変えない */
   private schedule() {
     const g = this.data.match?.game;
+    if (this.data.status === 'playing' && this.data.match?.betting) {
+      this.setDeadline(`${this.data.match.gameNo}:bet`, this.deps.timing.bet, true);
+      return;
+    }
     if (this.data.status !== 'playing' || !g || g.phase === 'result') {
       this.data.deadline = null;
       this.data.phaseKey = null;
@@ -269,7 +291,6 @@ export class Room {
       return;
     }
     const key = `${this.data.match!.gameNo}:${g.phase}:${g.phase === 'reveal' ? g.revealTurn : ''}`;
-    if (key === this.data.phaseKey && (this.data.deadline !== null || this.data.pausedRemain != null)) return;
     const t = this.deps.timing;
     const hidden = g.seats.length; // 各自が出した伏せ札の枚数
     const [ms, isTimeout] = ((): [number, boolean] => {
@@ -290,6 +311,12 @@ export class Room {
           return [t.swap, false];
       }
     })();
+    this.setDeadline(key, ms, isTimeout);
+  }
+
+  /** 締め切りを付ける。同じ局面のままなら付け直さない（止めている間の持ち時間は満タンで止めておく） */
+  private setDeadline(key: string, ms: number, isTimeout: boolean) {
+    if (key === this.data.phaseKey && (this.data.deadline !== null || this.data.pausedRemain != null)) return;
     this.data.deadlineMs = ms;
     this.data.deadlineIsTimeout = isTimeout;
     this.data.phaseKey = key;
@@ -313,6 +340,14 @@ export class Room {
 
   private fire() {
     this.timer = null;
+    if (this.data.status === 'playing' && this.data.match?.betting) {
+      // 親が選ばなければ最低ベット（B-0）
+      this.data.phaseKey = null;
+      this.data.deadline = null;
+      this.data.match = chooseBet(this.data.match, null, null, this.deps.rng);
+      this.commit();
+      return;
+    }
     const g = this.data.match?.game;
     if (!g || this.data.status !== 'playing') return;
     this.data.phaseKey = null; // 次の局面の締め切りを付け直す
@@ -375,6 +410,7 @@ export class Room {
       deadlineMs: d.deadlineMs,
       deadlineIsTimeout: d.deadlineIsTimeout,
       refund: m?.refund ?? null,
+      betting: m?.betting ? { dealerId: m.betting.dealerId, options: betOptions(m) } : null,
       paused: !!d.paused,
       pausedRemain: d.pausedRemain ?? null,
       serverTime: this.deps.now(),

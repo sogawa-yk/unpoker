@@ -20,6 +20,10 @@ export const ConfigMsg = z.object({
   initialChips: z.number().int(),
   bet: z.number().int(),
   maxGames: z.number().int().nullable(),
+  betMode: z.enum(['fixed', 'rotating']).optional(),
+  minBet: z.number().int().optional(),
+  maxBet: z.number().int().nullable().optional(),
+  betStep: z.number().int().optional(),
 });
 
 const roomId = z.string().regex(/^[A-Z2-9]{6}$/);
@@ -42,6 +46,8 @@ export const ClientMsg = z.discriminatedUnion('t', [
   z.object({ t: z.literal('nextGame') }),
   /** 持ち時間を止める・再開する（テーブル、対局中） */
   z.object({ t: z.literal('pause'), paused: z.boolean() }),
+  /** 持ち回り方式で、親がベット額を決める（スマホ） */
+  z.object({ t: z.literal('bet'), amount: z.number().int() }),
   /** ゲーム中の操作（スマホ） */
   z.object({ t: z.literal('action'), action: GameActionMsg }),
   z.object({ t: z.literal('ping') }),
@@ -79,6 +85,8 @@ export interface RoomView {
   deadlineIsTimeout: boolean;
   /** 対局の終了時に払い戻した持ち越しポット（プレイヤー ID → 額） */
   refund: Record<string, number> | null;
+  /** 持ち回り方式で、親がベット額を選んでいる間（配る前。game は null） */
+  betting: { dealerId: string; options: number[] } | null;
   /** テーブルが持ち時間を止めている */
   paused: boolean;
   /** 止めている間の操作待ちの残り（ミリ秒）。操作待ちでなければ null */

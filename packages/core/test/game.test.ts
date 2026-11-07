@@ -9,6 +9,9 @@ import {
   parseCards,
   pendingSeats,
   seededRng,
+  betOptions,
+  chooseBet,
+  validateConfig,
   settleGame,
   startGame,
   viewFor,
@@ -292,5 +295,57 @@ describe('追加でめくる（有料）と持ち越しポット', () => {
     expect(m.finished).toBe(true);
     expect(m.refund).toEqual({ [m.seatIds[0]!]: 50 });
     expect(m.carry!.amount).toBe(0);
+  });
+});
+
+describe('持ち回りベット（B-0）', () => {
+  const rot = { initialChips: 1000, bet: 100, maxGames: 3, betMode: 'rotating' as const, minBet: 100, maxBet: 300, betStep: 50 };
+  const finishGame = (g: GameState, rng: Rng) => {
+    while (g.phase !== 'result') g = apply(g, pendingSeats(g).length ? { type: 'timeout' } : { type: 'advance' }, rng);
+    return g;
+  };
+
+  it('親がベット額を選ぶまで配らず、選んだ額がそのゲームの B になる', () => {
+    const rng = seededRng(4);
+    let m = createMatch(rot, [0, 1, 2].map((i) => ({ id: `p${i}`, name: `P${i}` })));
+    m = startGame(m, rng);
+    expect(m.game).toBeNull();
+    expect(m.betting?.dealerId).toBe(m.dealerId);
+    expect(betOptions(m)).toEqual([100, 150, 200, 250, 300]);
+    const other = m.players.find((p) => p.id !== m.dealerId)!.id;
+    expect(() => chooseBet(m, other, 200, rng)).toThrow('親だけ');
+    expect(() => chooseBet(m, m.dealerId, 120, rng)).toThrow('選べない');
+    m = chooseBet(m, m.dealerId, 250, rng);
+    expect(m.betting).toBeNull();
+    expect(m.game!.bet).toBe(250);
+    expect(m.game!.peekPrice).toBe(63);
+    expect(m.game!.seats.every((s) => s.baseBet === 250)).toBe(true);
+    // 次のゲームは親が交代し、時間切れなら最低ベット
+    const firstDealer = m.dealerId;
+    m = settleGame({ ...m, game: finishGame(m.game!, rng) });
+    expect(m.history[0]!.bet).toBe(250);
+    m = startGame(m, rng);
+    expect(m.dealerId).not.toBe(firstDealer);
+    m = chooseBet(m, null, null, rng);
+    expect(m.game!.bet).toBe(100);
+  });
+
+  it('親の持ち点が最高ベットより少なければ、そこまでしか選べない（最低ベット未満なら最低ベットだけ）', () => {
+    const rng = seededRng(6);
+    let m = createMatch({ ...rot, maxBet: null }, [0, 1, 2].map((i) => ({ id: `p${i}`, name: `P${i}` })));
+    m = startGame(m, rng);
+    const d = m.players.find((p) => p.id === m.dealerId)!;
+    d.chips = 270;
+    expect(betOptions(m)).toEqual([100, 150, 200, 250]);
+    d.chips = 60;
+    expect(betOptions(m)).toEqual([100]);
+  });
+
+  it('設定の検査', () => {
+    expect(() => validateConfig({ ...rot, betStep: 30 })).toThrow('持ち回り');
+    expect(() => validateConfig({ ...rot, maxBet: 50 })).toThrow('持ち回り');
+    expect(() => validateConfig({ ...rot, maxBet: null })).not.toThrow();
+    // 固定方式では持ち回りの値は見ない
+    expect(() => validateConfig({ ...rot, betMode: 'fixed', betStep: 30 })).not.toThrow();
   });
 });

@@ -111,6 +111,7 @@ function PhoneGame({ room, s }: { room: Room; s: RoomView }) {
   const myId = s.you.role === 'player' ? s.you.playerId : '';
   // 二重送信を防ぐ: 同じ状態（サーバー時刻）の間は 1 回だけ送る
   const sentAt = useRef({ key: -1, at: 0 });
+  if (s.betting) return <PhoneBetting room={room} s={s} />;
   if (!g || g.you === null) {
     const me = s.players.find((p) => p.id === myId);
     return (
@@ -148,6 +149,87 @@ function PhoneGame({ room, s }: { room: Room; s: RoomView }) {
           <Placement g={g} me={me} act={act} name={name} />
         ) : (
           <AfterPlacement g={g} me={me} act={act} name={name} />
+        )}
+      </main>
+    </div>
+  );
+}
+
+/** 持ち回り方式: 親はベット額を選び、ほかの人は待つ（B-0） */
+function PhoneBetting({ room, s }: { room: Room; s: RoomView }) {
+  const b = s.betting!;
+  const myId = s.you.role === 'player' ? s.you.playerId : '';
+  const me = s.players.find((p) => p.id === myId);
+  const dealerName = s.players.find((p) => p.id === b.dealerId)?.name ?? '？';
+  const isDealer = b.dealerId === myId;
+  const [i, setI] = useState(0);
+  const opts = b.options;
+  const idx = Math.min(i, opts.length - 1);
+  const v = opts[idx]!;
+  return (
+    <div className="pg">
+      <header className="pg-head">
+        <span className="pg-name">{me?.name}</span>
+        {isDealer && <span className="dealer">親</span>}
+        <StackChips n={me?.chips ?? 0} />
+        <span className="pg-bet muted">{s.gameNo} ゲーム目</span>
+      </header>
+      <div className="pg-gauge">{isDealer ? <Gauge room={room} /> : <div className="gauge" style={{ visibility: 'hidden' }} />}</div>
+      <main className="pg-main">
+        {!isDealer ? (
+          <Instruction main={`${dealerName} がベット額を決めています`} sub={`${opts[0]!.toLocaleString()} 〜 ${opts[opts.length - 1]!.toLocaleString()} の中から選びます`} />
+        ) : (
+          <>
+            <Instruction
+              main="あなたが親です。ベット額を決める"
+              sub="全員がこの額を賭けます。チャレンジの参加費や、追加めくり・AI 相談の料金もこの額で決まります。持ち点が足りない人はオールインになります"
+            />
+            <div className="bet-pick">
+              <button type="button" className="st-btn big" aria-label="ベット額を下げる" disabled={idx === 0} onClick={() => setI(idx - 1)}>
+                −
+              </button>
+              <motion.span key={v} className="bet-value" initial={{ scale: 1.15 }} animate={{ scale: 1 }}>
+                {v.toLocaleString()}
+              </motion.span>
+              <button type="button" className="st-btn big" aria-label="ベット額を上げる" disabled={idx === opts.length - 1} onClick={() => setI(idx + 1)}>
+                ＋
+              </button>
+            </div>
+            {opts.length > 1 && (
+              <input
+                className="bet-range"
+                type="range"
+                min={0}
+                max={opts.length - 1}
+                step={1}
+                value={idx}
+                onChange={(e) => setI(Number(e.target.value))}
+                aria-label="ベット額"
+              />
+            )}
+            <dl className="bet-derived">
+              <div>
+                <dt>チャレンジ参加費</dt>
+                <dd>{v.toLocaleString()}</dd>
+              </div>
+              <div>
+                <dt>追加めくり</dt>
+                <dd>{Math.ceil(v / 4)}</dd>
+              </div>
+              <div>
+                <dt>AI 相談</dt>
+                <dd>
+                  {Math.ceil(v / 10)} ／ {Math.ceil(v / 4)}
+                </dd>
+              </div>
+            </dl>
+            <div className="pg-actions">
+              <HoldButton className="btn btn-shu btn-wide" ms={600} onDone={() => room.send({ t: 'bet', amount: v })}>
+                長押しで {v.toLocaleString()} に決めて配る
+              </HoldButton>
+              <p className="paid-note">30 秒で決まらなければ、最低の {opts[0]!.toLocaleString()} になります</p>
+            </div>
+          </>
         )}
       </main>
     </div>
@@ -588,6 +670,13 @@ function useBot(room: Room, on: boolean) {
   const g = room.state?.game;
   const key = room.state ? `${room.state.serverTime}` : '';
   useEffect(() => {
+    const st = room.state;
+    if (on && st?.betting && st.you.role === 'player' && st.betting.dealerId === st.you.playerId) {
+      const opts = st.betting.options;
+      const amount = opts[Math.floor(Math.random() * opts.length)]!;
+      const t = setTimeout(() => room.send({ t: 'bet', amount }), 1200);
+      return () => clearTimeout(t);
+    }
     if (!on || !g || g.you === null) return;
     const me = g.seats[g.you]!;
     let a: GameActionMsg | null = null;

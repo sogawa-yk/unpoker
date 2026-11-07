@@ -2,7 +2,7 @@
 import { AnimatePresence, motion } from 'motion/react';
 import QRCode from 'qrcode';
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { handName, type Card as CardT, type GameView, type SeatView } from '@unpoker/core';
+import { DEFAULT_CONFIG, handName, type Card as CardT, type GameView, type SeatView } from '@unpoker/core';
 import { Card } from '../components/Card.tsx';
 import { Chips, ConnBadge, Gauge, signed, Toast } from '../components/bits.tsx';
 import { provisionalRank, revealOdds, type HandOdds } from '../game.ts';
@@ -31,6 +31,8 @@ export function TableScreen({ roomId, navigate }: { roomId: string | null; navig
         <Finished s={s} navigate={navigate} />
       ) : s.game ? (
         <TableGame room={room} s={s} g={s.game} />
+      ) : s.betting ? (
+        <TableBetting room={room} s={s} />
       ) : null}
     </div>
   );
@@ -77,8 +79,10 @@ function Lobby({ room, s }: { room: Room; s: RoomView }) {
   useEffect(() => {
     void QRCode.toString(joinUrl, { type: 'svg', margin: 0, color: { dark: '#221d19', light: '#f2ecdc' } }).then(setQr);
   }, [joinUrl]);
-  const c = s.config;
+  // 古いルームの設定には持ち回りの項目が無いので、既定値で補う
+  const c = { ...DEFAULT_CONFIG, ...s.config };
   const set = (patch: Partial<typeof c>) => room.send({ t: 'configure', config: { ...c, ...patch } });
+  const rotating = c.betMode === 'rotating';
   const n = s.players.length;
   return (
     <div className="lobby">
@@ -115,7 +119,50 @@ function Lobby({ room, s }: { room: Room; s: RoomView }) {
         <h2 className="lobby-h">ルール設定</h2>
         <div className="settings">
           <Stepper label="最初の持ち点" value={c.initialChips} step={100} big={1000} min={500} max={10000} onChange={(v) => set({ initialChips: v })} />
-          <Stepper label="ベット額" value={c.bet} step={10} big={100} min={10} max={1000} onChange={(v) => set({ bet: v })} />
+          <Segmented
+            label="ベット方式"
+            value={c.betMode ?? 'fixed'}
+            options={[
+              ['fixed', '固定'],
+              ['rotating', '持ち回り'],
+            ]}
+            onChange={(v) => set({ betMode: v })}
+          />
+          {!rotating ? (
+            <Stepper label="ベット額" value={c.bet} step={10} big={100} min={10} max={1000} onChange={(v) => set({ bet: v })} />
+          ) : (
+            <>
+              <Stepper
+                label="最低ベット"
+                value={c.minBet!}
+                step={10}
+                big={100}
+                min={10}
+                max={1000}
+                onChange={(v) => set({ minBet: v, maxBet: c.maxBet !== null && c.maxBet! < v ? v : c.maxBet })}
+              />
+              <Stepper
+                label="最高ベット"
+                value={c.maxBet ?? 1010}
+                step={10}
+                big={100}
+                min={c.minBet!}
+                max={1010}
+                format={(v) => (v > 1000 ? '上限なし' : v.toLocaleString())}
+                onChange={(v) => set({ maxBet: v > 1000 ? null : v })}
+              />
+              <Segmented
+                label="刻み幅"
+                value={String(c.betStep)}
+                options={[
+                  ['10', '10'],
+                  ['50', '50'],
+                  ['100', '100'],
+                ]}
+                onChange={(v) => set({ betStep: Number(v) })}
+              />
+            </>
+          )}
           <Stepper
             label="ゲーム数"
             value={c.maxGames ?? 0}
@@ -130,7 +177,23 @@ function Lobby({ room, s }: { room: Room; s: RoomView }) {
         <button className="btn btn-shu btn-wide start" disabled={n < 3} onClick={() => room.send({ t: 'start' })}>
           {n < 3 ? `あと ${3 - n} 人で始められます` : `${n} 人で対局を始める`}
         </button>
+        {rotating && <p className="lobby-hint">持ち回り: ゲームごとに親がスマホでベット額を決めます（30 秒で決まらなければ最低ベット）</p>}
       </section>
+    </div>
+  );
+}
+
+function Segmented<T extends string>(props: { label: string; value: T; options: [T, string][]; onChange: (v: T) => void }) {
+  return (
+    <div className="stepper" role="radiogroup" aria-label={props.label}>
+      <span className="st-label">{props.label}</span>
+      <div className="seg">
+        {props.options.map(([v, text]) => (
+          <button key={v} type="button" role="radio" aria-checked={props.value === v} className={`seg-btn${props.value === v ? ' on' : ''}`} onClick={() => props.onChange(v)}>
+            {text}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -194,7 +257,7 @@ function TableGame({ room, s, g }: { room: Room; s: RoomView; g: GameView }) {
         <span>
           {s.gameNo} ゲーム目{s.config.maxGames ? ` ／ ${s.config.maxGames}` : ''}
         </span>
-        <span>
+        <span className={rotatingBet(s) ? 'bet-now' : undefined}>
           ベット <Chips n={g.bet} />
         </span>
         {g.carryIn > 0 && (
@@ -207,16 +270,7 @@ function TableGame({ room, s, g }: { room: Room; s: RoomView; g: GameView }) {
             次へ <Chips n={nextCarry} />
           </span>
         )}
-        {g.phase !== 'result' && (
-          <button
-            type="button"
-            className={`pause-btn${s.paused ? ' on' : ''}`}
-            aria-pressed={s.paused}
-            onClick={() => room.send({ t: 'pause', paused: !s.paused })}
-          >
-            {s.paused ? '▶ 持ち時間を再開' : 'Ⅱ 持ち時間を止める'}
-          </button>
-        )}
+        {g.phase !== 'result' && <PauseButton room={room} s={s} />}
       </header>
       <div className="arena">
         {g.seats.map((sv, i) => (
@@ -241,7 +295,78 @@ function TableGame({ room, s, g }: { room: Room; s: RoomView; g: GameView }) {
         </div>
       </div>
       <NutOverlay g={g} />
+      <BetAnnounce s={s} g={g} names={names} />
     </div>
+  );
+}
+
+const rotatingBet = (s: RoomView) => s.config.betMode === 'rotating';
+
+function PauseButton({ room, s }: { room: Room; s: RoomView }) {
+  return (
+    <button type="button" className={`pause-btn${s.paused ? ' on' : ''}`} aria-pressed={s.paused} onClick={() => room.send({ t: 'pause', paused: !s.paused })}>
+      {s.paused ? '▶ 持ち時間を再開' : 'Ⅱ 持ち時間を止める'}
+    </button>
+  );
+}
+
+/** 持ち回り方式: 親がベット額を選んでいる間のテーブル */
+function TableBetting({ room, s }: { room: Room; s: RoomView }) {
+  const b = s.betting!;
+  const name = s.players.find((p) => p.id === b.dealerId)?.name ?? '？';
+  const lo = b.options[0]!;
+  const hi = b.options[b.options.length - 1]!;
+  return (
+    <div className="game">
+      <header className="game-head">
+        <span>
+          {s.gameNo} ゲーム目{s.config.maxGames ? ` ／ ${s.config.maxGames}` : ''}
+        </span>
+        <PauseButton room={room} s={s} />
+      </header>
+      <div className="betting">
+        <span className="dealer big" aria-hidden="true">
+          親
+        </span>
+        <p className="betting-title">
+          <b>{name}</b> がベット額を決めています
+        </p>
+        <p className="muted">{lo === hi ? `${lo}（親の持ち点に合わせて）` : `${lo.toLocaleString()} 〜 ${hi.toLocaleString()} から選びます`}</p>
+        <div className="center-gauge">
+          <Gauge room={room} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** 持ち回り方式: 配った直後に、そのゲームのベット額を大きく発表する（B-0） */
+function BetAnnounce({ s, g, names }: { s: RoomView; g: GameView; names: string[] }) {
+  const [shown, setShown] = useState<number | null>(null);
+  const seen = useRef(0);
+  useEffect(() => {
+    if (!rotatingBet(s) || g.phase !== 'placement' || seen.current === s.gameNo) return;
+    seen.current = s.gameNo;
+    setShown(s.gameNo);
+    const t = setTimeout(() => setShown(null), 2600);
+    return () => clearTimeout(t);
+  }, [s.gameNo, g.phase]); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <AnimatePresence>
+      {shown !== null && (
+        <motion.div className="bet-announce" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+          <motion.div
+            className="bet-announce-card"
+            initial={{ scale: 1.6, rotate: -8, opacity: 0 }}
+            animate={{ scale: 1, rotate: -3, opacity: 1 }}
+            transition={{ type: 'spring', stiffness: 320, damping: 18 }}
+          >
+            <span className="bet-announce-label">親 {names[g.dealer]} が決めたベット</span>
+            <span className="bet-announce-value">{g.bet.toLocaleString()}</span>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }
 

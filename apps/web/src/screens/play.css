@@ -491,3 +491,59 @@
   white-space: nowrap;
   pointer-events: none;
 }
+
+/* ---- 持ち回りベット（親のベット選び） ---- */
+.bet-pick {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  margin-top: 18px;
+}
+.st-btn.big {
+  width: 56px;
+  height: 56px;
+  font-size: 28px;
+}
+.bet-value {
+  min-width: 4ch;
+  text-align: center;
+  font-family: var(--mincho);
+  font-weight: 700;
+  font-size: 64px;
+  line-height: 1;
+  color: var(--kin-hi);
+  font-variant-numeric: tabular-nums;
+}
+.bet-range {
+  width: 100%;
+  accent-color: var(--kin);
+}
+.bet-derived {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.bet-derived div {
+  padding: 8px;
+  border-radius: 10px;
+  background: rgb(0 0 0 / 0.2);
+  text-align: center;
+}
+.bet-derived dt {
+  font-size: 11px;
+  color: var(--hakuai);
+}
+.bet-derived dd {
+  margin: 2px 0 0;
+  font-weight: 700;
+  color: var(--kinari);
+  font-variant-numeric: tabular-nums;
+}
+.bet-pick .st-btn {
+  color: var(--kinari);
+}
+.bet-pick .st-btn:disabled {
+  opacity: 0.3;
+}

@@ -14,6 +14,7 @@ const FAST = {
   boardRevealPerCard: 5,
   ranking: 10,
   swap: 10,
+  bet: 300,
 };
 
 type App = Awaited<ReturnType<typeof createApp>>;
@@ -256,6 +257,37 @@ describe('サーバー', () => {
     await table.until(() => table.state!.game!.seats[seat]!.consulted.length === 1);
     expect(table.state!.game!.seats[seat]!.advice).toEqual([]);
     expect(JSON.stringify(players[1]!.state)).not.toContain('"candidates"');
+  });
+
+  it('持ち回りベット: 親だけがベット額を選べ、選ばなければ最低ベットで配る', async () => {
+    const { url } = await start();
+    const { table, players } = await setupRoom(url, ['親', '子', '孫']);
+    players.forEach((p) => (p.idle = true));
+    table.send({ t: 'configure', config: { initialChips: 1000, bet: 100, maxGames: 5, betMode: 'rotating', minBet: 100, maxBet: 300, betStep: 100 } });
+    await table.until(() => table.state!.config.betMode === 'rotating');
+    table.send({ t: 'start' });
+    const b = await table.until(() => table.state!.betting);
+    expect(table.state!.game).toBeNull();
+    expect(b.options).toEqual([100, 200, 300]);
+    expect(table.state!.deadlineIsTimeout).toBe(true);
+    const dealer = players.find((p) => p.playerId === b.dealerId)!;
+    const other = players.find((p) => p.playerId !== b.dealerId)!;
+    other.send({ t: 'bet', amount: 200 });
+    await other.until(() => other.msgs.some((m) => m.t === 'error' && m.message.includes('親だけ')));
+    dealer.send({ t: 'bet', amount: 300 });
+    await table.until(() => table.state!.game?.bet === 300);
+    expect(table.state!.betting).toBeNull();
+  });
+
+  it('持ち回りベット: 親が選ばないまま持ち時間が切れると最低ベット', async () => {
+    const { url } = await start();
+    const { table, players } = await setupRoom(url, ['甲', '乙', '丙']);
+    players.forEach((p) => (p.idle = true));
+    table.send({ t: 'configure', config: { initialChips: 1000, bet: 100, maxGames: 5, betMode: 'rotating', minBet: 50, maxBet: null, betStep: 50 } });
+    await table.until(() => table.state!.config.betMode === 'rotating');
+    table.send({ t: 'start' });
+    await table.until(() => table.state!.betting);
+    await table.until(() => table.state!.game?.bet === 50, 4000);
   });
 
   it('サーバーを再起動しても、保存した状態から続けられる', async () => {
