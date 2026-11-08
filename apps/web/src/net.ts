@@ -67,6 +67,8 @@ export interface Room {
   error: { message: string; code?: string; at: number } | null;
   /** サーバー時刻 − 端末の時刻（ミリ秒） */
   clockOffset: number;
+  /** 画面に出ている状態が古いかもしれない（裏から戻って、最新の状態を待っている間） */
+  stale: boolean;
   send: (msg: ClientMsg) => void;
 }
 
@@ -79,6 +81,7 @@ export function useRoom(roomId: string | null, role: Role, onOpen?: (send: (m: C
   const [status, setStatus] = useState<ConnStatus>('connecting');
   const [error, setError] = useState<Room['error']>(null);
   const [clockOffset, setClockOffset] = useState(0);
+  const [stale, setStale] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const onOpenRef = useRef(onOpen);
   onOpenRef.current = onOpen;
@@ -95,9 +98,25 @@ export function useRoom(roomId: string | null, role: Role, onOpen?: (send: (m: C
     let retry = 0;
     let pingTimer: ReturnType<typeof setInterval> | undefined;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    /** 最後にサーバーから何か届いた時刻。ping には必ず pong が返るので、長く途切れたら接続が死んでいる */
+    let lastMsgAt = Date.now();
+    let hiddenAt: number | null = null;
+
+    /** 今の接続を捨てて、すぐにつなぎ直す（捨てる接続の後始末で、もう 1 本つながないよう先に外す） */
+    const reconnectNow = () => {
+      clearTimeout(reconnectTimer);
+      clearInterval(pingTimer);
+      const old = wsRef.current;
+      if (old) {
+        old.onopen = old.onmessage = old.onclose = null;
+        old.close();
+      }
+      connect();
+    };
 
     const connect = () => {
       setStatus('connecting');
+      lastMsgAt = Date.now();
       const ws = new WebSocket(wsUrl());
       wsRef.current = ws;
       ws.onopen = () => {
@@ -111,14 +130,17 @@ export function useRoom(roomId: string | null, role: Role, onOpen?: (send: (m: C
         pingTimer = setInterval(() => ws.readyState === WebSocket.OPEN && ws.send('{"t":"ping"}'), 25_000);
       };
       ws.onmessage = (ev) => {
+        lastMsgAt = Date.now();
         const m = JSON.parse(String(ev.data)) as ServerMsg;
         if (m.t === 'welcome') saveToken(m.roomId, m.role, m.token);
         else if (m.t === 'state') {
           setState(m.room);
+          setStale(false);
           setClockOffset(m.room.serverTime - Date.now());
         } else if (m.t === 'error') {
           setError({ message: m.message, code: m.code, at: Date.now() });
           if (m.code === 'bad_token' && roomRef.current) forgetToken(roomRef.current, role);
+          if (m.code === 'room_not_found' || m.code === 'bad_token') setStale(false);
         }
       };
       ws.onclose = () => {
@@ -130,25 +152,43 @@ export function useRoom(roomId: string | null, role: Role, onOpen?: (send: (m: C
       };
     };
     connect();
-    // 画面に戻ってきたら、切れていればすぐつなぎ直す（iOS は裏に回ると切れる）
+    // 画面に戻ってきたら、つなぎ直して最新の状態をもらう。
+    // iOS は裏に回ると通信を止めるが、戻ったときに接続が「つながっている」ままに見えることがあり、
+    // そのままだと次のゲームに進んでも前のゲームの画面が残る。届くまでは古い画面だと示す
     const onVisible = () => {
-      if (document.visibilityState === 'visible' && wsRef.current?.readyState !== WebSocket.OPEN) {
-        clearTimeout(reconnectTimer);
-        wsRef.current?.close();
-        connect();
+      if (document.visibilityState === 'hidden') {
+        hiddenAt = Date.now();
+        return;
       }
+      const away = hiddenAt === null ? 0 : Date.now() - hiddenAt;
+      hiddenAt = null;
+      if (away < 1500 && wsRef.current?.readyState === WebSocket.OPEN) return;
+      if (roomRef.current) setStale(true);
+      reconnectNow();
     };
+    // 返事が途切れた接続は捨てる（ping は 25 秒ごと。pong が来なければ 35 秒で気づく）
+    const watchdog = setInterval(() => {
+      if (document.visibilityState === 'visible' && wsRef.current?.readyState === WebSocket.OPEN && Date.now() - lastMsgAt > 35_000) {
+        if (roomRef.current) setStale(true);
+        reconnectNow();
+      }
+    }, 5_000);
     document.addEventListener('visibilitychange', onVisible);
+    addEventListener('pageshow', onVisible);
     return () => {
       stopped = true;
       clearInterval(pingTimer);
+      clearInterval(watchdog);
       clearTimeout(reconnectTimer);
       document.removeEventListener('visibilitychange', onVisible);
-      wsRef.current?.close();
+      removeEventListener('pageshow', onVisible);
+      const ws = wsRef.current;
+      if (ws) ws.onclose = null;
+      ws?.close();
     };
   }, [role]);
 
-  return { state, status, error, clockOffset, send };
+  return { state, status, error, clockOffset, stale, send };
 }
 
 /** 締め切りまでの残り（0〜1）を毎フレーム更新する */

@@ -347,6 +347,21 @@ button {
   color: #fff;
   z-index: 100;
 }
+/* 裏から戻った直後: 最新の状態が届くまで、前の画面を隠して触れないようにする */
+.stale-cover {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgb(22 38 74 / 0.92); /* --ai-deep */
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: var(--kinari);
+  font-size: 15px;
+  text-align: center;
+}
 .field {
   width: 100%;
   font: inherit;
