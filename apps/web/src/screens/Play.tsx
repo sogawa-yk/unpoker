@@ -8,6 +8,7 @@ import { AdvicePanel, adviceNow, arrangePlan } from '../components/Advice.tsx';
 import { Chips, ConnBadge, Gauge, HoldButton, PaidButton, StackChips, signed, Toast } from '../components/bits.tsx';
 import { provisionalRank } from '../game.ts';
 import { savedToken, useRoom, type Room, type RoomView } from '../net.ts';
+import { FinalList, HostControls, HostLobby, NextGame, SwapBoard, TableStrip, TablelessCtx, tablelessOf, useTableless } from './PlayTable.tsx';
 import { sfx } from '../sound.ts';
 import './play.css';
 
@@ -23,6 +24,7 @@ export function PlayScreen({ roomId }: { roomId: string }) {
   const hasToken = savedToken(roomId, 'player') !== null;
   const notFound = room.error?.code === 'room_not_found';
   return (
+    <TablelessCtx.Provider value={tablelessOf(s)}>
     <div className="ply felt">
       <ConnBadge room={room} />
       <Toast room={room} />
@@ -33,13 +35,14 @@ export function PlayScreen({ roomId }: { roomId: string }) {
       ) : !s || s.you.role !== 'player' ? (
         hasToken && room.error?.code !== 'bad_token' ? <Centered>つないでいます…</Centered> : <JoinForm room={room} roomId={roomId} />
       ) : s.status === 'lobby' ? (
-        <Waiting s={s} />
+        s.hostId === s.you.playerId ? <HostLobby room={room} s={s} /> : <Waiting s={s} />
       ) : s.status === 'finished' ? (
         <PhoneFinished s={s} />
       ) : (
         <PhoneGame room={room} s={s} />
       )}
     </div>
+    </TablelessCtx.Provider>
   );
 }
 
@@ -84,7 +87,9 @@ function Waiting({ s }: { s: RoomView }) {
   return (
     <Centered>
       <p className="ply-big">{me?.name} さん、ようこそ</p>
-      <p className="muted">テーブルで対局が始まるのを待っています（{s.players.length} / 4 人）</p>
+      <p className="muted">
+        {tablelessOf(s).on ? `${tablelessOf(s).hostName} さんが対局を始めるのを待っています` : 'テーブルで対局が始まるのを待っています'}（{s.players.length} / 4 人）
+      </p>
       <p className="muted small">ホーム画面に追加すると、全画面で遊べます</p>
     </Centered>
   );
@@ -100,7 +105,7 @@ function PhoneFinished({ s }: { s: RoomView }) {
       <p className="ply-big">
         <Chips n={me?.chips ?? 0} />
       </p>
-      <p className="muted">対局が終わりました。結果はテーブルで</p>
+      {tablelessOf(s).on ? <FinalList s={s} /> : <p className="muted">対局が終わりました。結果はテーブルで</p>}
     </Centered>
   );
 }
@@ -118,7 +123,10 @@ function PhoneGame({ room, s }: { room: Room; s: RoomView }) {
     return (
       <Centered>
         <p className="ply-big">観戦中</p>
-        <p className="muted">{me && me.chips <= 0 ? '持ち点がなくなりました。テーブルで続きを見守りましょう' : '次のゲームから参加します'}</p>
+        <p className="muted">{me && me.chips <= 0 ? '持ち点がなくなりました。続きを見守りましょう' : '次のゲームから参加します'}</p>
+        <HostControls room={room} s={s} g={g} />
+        {g && tablelessOf(s).on && <TableStrip s={s} g={g} />}
+        {g && tablelessOf(s).on && g.phase === 'result' && <NextGame room={room} s={s} />}
       </Centered>
     );
   }
@@ -143,6 +151,7 @@ function PhoneGameBody({
   sentAt: React.MutableRefObject<{ key: number; at: number }>;
 }) {
   usePhoneSounds(s.gameNo, me);
+  const tableless = useTableless();
   const you = g.you!;
   const act = (a: GameActionMsg) => {
     // 拒否されたときに押し直せるよう、1.5 秒たてば同じ状態でも送れる
@@ -165,11 +174,13 @@ function PhoneGameBody({
         <span className="pg-bet muted">ベット {g.bet}</span>
       </header>
       <MyGauge room={room} g={g} />
+      <HostControls room={room} s={s} g={g} />
       <main className="pg-main">
+        {tableless.on && <TableStrip s={s} g={g} />}
         {g.phase === 'placement' ? (
           <Placement g={g} me={me} act={act} name={name} />
         ) : (
-          <AfterPlacement g={g} me={me} act={act} name={name} />
+          <AfterPlacement room={room} s={s} g={g} me={me} act={act} name={name} />
         )}
       </main>
     </div>
@@ -283,6 +294,7 @@ function MyGauge({ room, g }: { room: Room; g: GameView }) {
 const ALL = [0, 1, 2, 3, 4, 5, 6];
 
 function Placement({ g, me, act, name }: { g: GameView; me: SeatView; act: (a: GameActionMsg) => void; name: (i: number) => string }) {
+  const tableless = useTableless();
   const [sel, setSel] = useState<number | null>(null);
   /** 追加でめくろうとしている札（料金がかかるので、長押しで確定する） */
   const [buy, setBuy] = useState<number | null>(null);
@@ -309,7 +321,7 @@ function Placement({ g, me, act, name }: { g: GameView; me: SeatView; act: (a: G
       />
       {extra > 0 && (
         <p className="paid-note">
-          追加で {extra} 枚めくりました（{extra * price} 点）。めくった枚数は iPad に出ます
+          追加で {extra} 枚めくりました（{extra * price} 点）。めくった枚数は{tableless.on ? 'ほかの人のスマホ' : ' iPad '}に出ます
         </p>
       )}
       {boardKnown.length > 0 && <MiniBoard cards={boardKnown} label="場札" />}
@@ -523,7 +535,22 @@ function Arrange({ g, me, act, name }: { g: GameView; me: SeatView; act: (a: Gam
   );
 }
 
-function AfterPlacement({ g, me, act, name }: { g: GameView; me: SeatView; act: (a: GameActionMsg) => void; name: (i: number) => string }) {
+function AfterPlacement({
+  room,
+  s,
+  g,
+  me,
+  act,
+  name,
+}: {
+  room: Room;
+  s: RoomView;
+  g: GameView;
+  me: SeatView;
+  act: (a: GameActionMsg) => void;
+  name: (i: number) => string;
+}) {
+  const tableless = useTableless();
   const you = g.you!;
   const prov = g.provisional;
   const res = g.result;
@@ -554,7 +581,11 @@ function AfterPlacement({ g, me, act, name }: { g: GameView; me: SeatView; act: 
             <span className={`seal ply-seal${rank === 1 ? ' kin' : ''}`}>{rank}位</span>
             <span className="rank-hand">{handName(score)}</span>
           </div>
-          <MiniBoard cards={g.board.filter((c): c is CardT => c !== null)} label={g.phase === 'swap' ? '入れ替え後の場札' : '場札'} />
+          {tableless.on && g.phase === 'swap' ? (
+            <SwapBoard s={s} g={g} />
+          ) : (
+            <MiniBoard cards={g.board.filter((c): c is CardT => c !== null)} label={g.phase === 'swap' ? '入れ替え後の場札' : '場札'} />
+          )}
           <SetsView me={me} compact best={prov!.bestSet[you]} />
           {g.phase === 'declare' && lastMe && !me.declareDone && (
             <Decision
@@ -568,7 +599,7 @@ function AfterPlacement({ g, me, act, name }: { g: GameView; me: SeatView; act: 
             />
           )}
           {g.phase === 'swap' && g.challenge?.roller === you && (g.challenge.roulette === 'ready' || g.challenge.roulette === 'spinning') && (
-            <RouletteControl spinning={g.challenge.roulette === 'spinning'} onPress={(cmd) => act({ type: 'roulette', cmd })} />
+            <RouletteControl spinning={g.challenge.roulette === 'spinning'} where={tableless.on ? '上の場札' : 'iPad の場札'} onPress={(cmd) => act({ type: 'roulette', cmd })} />
           )}
           {g.phase === 'join' && optMe && !me.joinDone && (
             <Decision
@@ -580,7 +611,7 @@ function AfterPlacement({ g, me, act, name }: { g: GameView; me: SeatView; act: 
               advice={<AdvicePanel g={g} me={me} act={act} name={name} />}
             />
           )}
-          <p className="muted pg-note">{waitingNote(g, you, name)}</p>
+          <p className="muted pg-note">{waitingNote(g, you, name, tableless.on)}</p>
         </>
       );
     }
@@ -599,7 +630,7 @@ function AfterPlacement({ g, me, act, name }: { g: GameView; me: SeatView; act: 
           {res!.nut && <p className="ply-nut">ナッツ！ ベット分が倍になりました</p>}
           <MiniBoard cards={res!.board} label="最終の場札" />
           <SetsView me={me} compact best={res!.bestSet[you]} />
-          <p className="muted pg-note">テーブルで次のゲームへ進みます</p>
+          {tableless.on ? <NextGame room={room} s={s} /> : <p className="muted pg-note">テーブルで次のゲームへ進みます</p>}
         </>
       );
     }
@@ -607,12 +638,12 @@ function AfterPlacement({ g, me, act, name }: { g: GameView; me: SeatView; act: 
   return null;
 }
 
-function waitingNote(g: GameView, you: number, name: (i: number) => string): string {
+function waitingNote(g: GameView, you: number, name: (i: number) => string, tableless: boolean): string {
   const prov = g.provisional!;
   const lasts = prov.lasts.map(name).join('・');
   switch (g.phase) {
     case 'ranking':
-      return 'テーブルで仮順位を発表しています';
+      return tableless ? '仮順位を発表しています' : 'テーブルで仮順位を発表しています';
     case 'declare':
       return prov.lasts.includes(you) && g.seats[you]!.declareDone ? '決めました。結果を待っています' : prov.lasts.includes(you) ? '' : `${lasts} がチャレンジを考えています`;
     case 'join':
@@ -622,7 +653,7 @@ function waitingNote(g: GameView, you: number, name: (i: number) => string): str
       if (ch.roller === you && (ch.roulette === 'ready' || ch.roulette === 'spinning')) return '';
       if (ch.roulette === 'ready') return `${name(ch.roller!)} がルーレットを回します`;
       if (ch.roulette === 'spinning') return `${name(ch.roller!)} がストップを押します`;
-      return 'テーブルで場札を入れ替えています';
+      return tableless ? '場札を入れ替えています' : 'テーブルで場札を入れ替えています';
     }
     default:
       return '';
@@ -630,12 +661,12 @@ function waitingNote(g: GameView, you: number, name: (i: number) => string): str
 }
 
 /** チャレンジを宣言した人のスマホ: 場札入れ替えのルーレットを回して、止める */
-function RouletteControl({ spinning, onPress }: { spinning: boolean; onPress: (cmd: 'start' | 'stop') => void }) {
+function RouletteControl({ spinning, where, onPress }: { spinning: boolean; where: string; onPress: (cmd: 'start' | 'stop') => void }) {
   return (
     <motion.section className="decision roulette-ctl" initial={{ y: 30, opacity: 0 }} animate={{ y: 0, opacity: 1 }}>
       <h2 className="decision-title">{spinning ? 'いつでも止められます' : 'ルーレットを回してください'}</h2>
       <p className="decision-body">
-        {spinning ? 'iPad の場札の上を光が回っています。ストップを押すと、だんだん遅くなって 1 枚で止まり、その札が入れ替わります' : '場札 5 枚のどれか 1 枚が入れ替わります。どの札になるかは運次第です'}
+        {spinning ? `${where}の上を光が回っています。ストップを押すと、だんだん遅くなって 1 枚で止まり、その札が入れ替わります` : '場札 5 枚のどれか 1 枚が入れ替わります。どの札になるかは運次第です'}
       </p>
       <motion.button
         key={spinning ? 'stop' : 'start'}

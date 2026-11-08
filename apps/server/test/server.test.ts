@@ -402,6 +402,53 @@ describe('サーバー', () => {
     await late.until(() => late.msgs.some((m) => m.t === 'error' && m.message.includes('始まっている')));
   });
 
+  it('テーブルなし: スマホがルームを作って親機になり、設定・開始・次のゲームを操作できる', async () => {
+    const { url, store } = await start();
+    const host = new Client(url);
+    await host.open();
+    host.send({ t: 'hostRoom', name: '親' });
+    await host.until(() => host.state?.roomId);
+    const roomId = host.state!.roomId;
+    expect(host.state!.hostId).toBe(host.playerId);
+    expect(host.state!.you).toEqual({ role: 'player', playerId: host.playerId });
+    const others: Client[] = [];
+    for (const name of ['子1', '子2']) {
+      const c = new Client(url);
+      await c.open();
+      c.send({ t: 'join', roomId, name });
+      await c.until(() => c.playerId);
+      others.push(c);
+    }
+    const players = [host, ...others];
+    await host.until(() => host.state!.players.length === 3);
+    // 親機以外は設定も開始もできない。親機は外せない
+    others[0]!.send({ t: 'start' });
+    await others[0]!.until(() => others[0]!.msgs.some((m) => m.t === 'error' && m.message.includes('テーブルだけ')));
+    host.send({ t: 'kick', playerId: host.playerId });
+    await host.until(() => host.msgs.some((m) => m.t === 'error' && m.message.includes('親機は外せない')));
+    host.send({ t: 'configure', config: { initialChips: 1000, bet: 100, maxGames: 2 } });
+    await host.until(() => host.state!.config.maxGames === 2);
+    host.send({ t: 'start' });
+    // 親機は持ち時間を止めて、また動かせる
+    await host.until(() => host.state!.game?.phase === 'placement');
+    host.send({ t: 'pause', paused: true });
+    await others[1]!.until(() => others[1]!.state!.paused);
+    host.send({ t: 'pause', paused: false });
+    await others[1]!.until(() => !others[1]!.state!.paused);
+    await playUntilResult(host, players, 1);
+    host.send({ t: 'nextGame' });
+    await host.until(() => host.state!.gameNo === 2);
+    await playUntilResult(host, players, 2);
+    host.send({ t: 'nextGame' });
+    await host.until(() => host.state!.status === 'finished');
+    expect(host.state!.players.reduce((a, p) => a + p.chips, 0)).toBe(3000);
+    players.forEach(assertNoLeak);
+    // 親機の印は保存され、読み戻しても残る
+    await host.until(() => true);
+    const saved = (await store.loadAll()).find((d) => d.id === roomId)!;
+    expect(saved.hostId).toBe(host.playerId);
+  });
+
   it('/healthz に応答する', async () => {
     const { port } = await start();
     const res = await fetch(`http://127.0.0.1:${port}/healthz`);

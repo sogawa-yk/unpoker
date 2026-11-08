@@ -209,3 +209,6 @@ export const sfx = {
     tone(c, t + 0.07, 2637, 0.35, 0.18, 'sine');
   },
 };
+
+/** 鳴らさない版（同じ部品を、音を出さない端末で使うとき） */
+export const noSfx: typeof sfx = Object.fromEntries(Object.keys(sfx).map((k) => [k, () => {}])) as unknown as typeof sfx;

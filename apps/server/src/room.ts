@@ -80,6 +80,8 @@ export interface RoomData {
   deadlineIsTimeout: boolean;
   /** 締め切りを決めたときの局面（同じ局面の間は締め切りを延ばさない） */
   phaseKey: string | null;
+  /** テーブルなしで遊ぶルームの親機（ルームを作ったスマホ）。iPad で作ったルームは無い */
+  hostId?: string | null;
   /** テーブルが持ち時間を止めている。演出の待ち時間は止めない（古い保存データには無い） */
   paused?: boolean;
   /** 止めている間の、操作待ちの残り時間（ミリ秒） */
@@ -160,12 +162,14 @@ export class Room {
 
   // ---- 参加者 ----
 
-  join(name: string): RoomPlayer {
+  /** 参加する。host なら、テーブルなしで遊ぶルームの親機にする */
+  join(name: string, host = false): RoomPlayer {
     if (this.data.status !== 'lobby') throw new RoomError('対局が始まっているので参加できない');
     if (this.data.players.length >= MAX_PLAYERS) throw new RoomError('満席', 'room_full');
     if (this.data.players.some((p) => p.name === name)) throw new RoomError('同じ名前の参加者がいる');
     const p: RoomPlayer = { id: newPlayerId(), name, token: newToken() };
     this.data.players.push(p);
+    if (host) this.data.hostId = p.id;
     this.commit();
     return p;
   }
@@ -198,6 +202,7 @@ export class Room {
 
   kick(playerId: string) {
     if (this.data.status !== 'lobby') throw new RoomError('外せるのは待機中だけ');
+    if (playerId === this.data.hostId) throw new RoomError('親機は外せない');
     const before = this.data.players.length;
     this.data.players = this.data.players.filter((p) => p.id !== playerId);
     if (this.data.players.length === before) throw new RoomError('その参加者はいない');
@@ -454,6 +459,7 @@ export class Room {
         return { id: p.id, name: p.name, connected: connected.has(p.id), chips: chipsNow, seat: s >= 0 ? s : null };
       }),
       tableConnected: [...this.conns].some((c) => c.role === 'table'),
+      hostId: d.hostId ?? null,
       you: conn.role === 'player' && conn.playerId ? { role: 'player', playerId: conn.playerId } : { role: 'table' },
       gameNo: m?.gameNo ?? 0,
       dealerId: m?.dealerId ?? null,

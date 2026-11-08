@@ -37,29 +37,9 @@
 .wordmark.small {
   font-size: 44px;
 }
-.qr {
-  width: clamp(180px, 26vw, 280px);
-  aspect-ratio: 1;
-  padding: 18px;
-  background: var(--kinari);
-  border-radius: 14px;
-  box-shadow: 0 0 0 6px var(--kin), 0 14px 40px rgb(0 0 0 / 0.45);
-}
-.qr svg {
-  display: block;
-  width: 100%;
-  height: 100%;
-}
 .lobby-hint {
   margin: 10px 0 0;
   color: var(--hakuai);
-}
-.room-code {
-  margin: 0;
-  font-family: var(--mincho);
-  font-size: 34px;
-  letter-spacing: 0.3em;
-  color: var(--kin-hi);
 }
 .lobby-side {
   display: grid;
@@ -103,47 +83,6 @@
   color: var(--hakuai);
   font-size: 13px;
 }
-.dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--ai-line);
-}
-.dot.on {
-  background: #7fd18b;
-}
-.settings {
-  display: grid;
-  gap: 6px;
-}
-.stepper {
-  display: grid;
-  grid-template-columns: 1fr auto auto minmax(96px, auto) auto auto;
-  align-items: center;
-  gap: 4px;
-}
-.st-label {
-  color: var(--hakuai);
-}
-.st-value {
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-  font-size: 18px;
-}
-.st-btn {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  border: 0;
-  background: rgb(0 0 0 / 0.2);
-  font-size: 18px;
-}
-.start {
-  margin-top: 10px;
-  font-size: 18px;
-  padding: 1em;
-}
 
 /* ---- 対局 ---- */
 .game {
@@ -183,28 +122,6 @@
 .carry.next {
   color: var(--hakuai);
 }
-/* 持ち時間の一時停止（テーブルだけが操作できる） */
-.pause-btn {
-  font: inherit;
-  font-size: 15px;
-  min-height: 44px; /* 指で押しやすい大きさ */
-  padding: 8px 18px;
-  border-radius: 999px;
-  border: 1px solid var(--ai-line);
-  background: rgb(0 0 0 / 0.2);
-  color: var(--hakuai);
-  cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
-}
-.pause-btn.on {
-  border-color: var(--kin);
-  background: rgb(201 162 74 / 0.18);
-  color: var(--kin-hi);
-}
-.pause-btn:focus-visible {
-  outline: 2px solid var(--kin-hi);
-  outline-offset: 2px;
-}
 .arena {
   position: absolute;
   inset: 0;
@@ -243,24 +160,6 @@
   position: absolute;
   top: -62px;
   font-size: 22px;
-}
-.board {
-  display: flex;
-  gap: 12px;
-  padding: 14px 18px;
-  border-radius: 16px;
-  background: rgb(0 0 0 / 0.16);
-  box-shadow: inset 0 0 0 1px rgb(201 162 74 / 0.25);
-}
-.board-slot {
-  position: relative;
-}
-.roulette {
-  position: absolute;
-  inset: -6px;
-  border-radius: 11px;
-  box-shadow: 0 0 0 3px var(--kin-hi), 0 0 26px 6px rgb(240 214 138 / 0.65);
-  pointer-events: none;
 }
 .center-gauge {
   width: 60%;
@@ -498,33 +397,6 @@
   }
 }
 
-/* ---- 持ち回りベット ---- */
-.seg {
-  display: inline-flex;
-  margin-left: auto;
-  border-radius: 999px;
-  box-shadow: inset 0 0 0 1px var(--ai-line);
-  overflow: hidden;
-}
-.seg-btn {
-  font: inherit;
-  font-size: 14px;
-  min-height: 36px;
-  padding: 0 14px;
-  border: 0;
-  background: transparent;
-  color: var(--hakuai);
-  cursor: pointer;
-}
-.seg-btn.on {
-  background: var(--kinari);
-  color: var(--sumi);
-  font-weight: 600;
-}
-.seg-btn:focus-visible {
-  outline: 2px solid var(--kin-hi);
-  outline-offset: -2px;
-}
 .bet-now .chips {
   font-size: 18px;
 }
@@ -586,11 +458,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-.lobby-hint.small {
-  margin: 0;
-  font-size: 12.5px;
-  line-height: 1.6;
-}
 
 /* 小さめの iPad でも設定が画面に収まるよう、卓につく人は 2 列にし、それでも溢れたら右の列だけスクロール */
 .lobby-players {

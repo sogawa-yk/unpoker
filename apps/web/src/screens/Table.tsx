@@ -1,13 +1,14 @@
 // テーブル（iPad・横向き）。公開情報だけを受け取り、演出を担当する
 import { AnimatePresence, motion } from 'motion/react';
-import QRCode from 'qrcode';
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { DEFAULT_CONFIG, handName, type Card as CardT, type GameView, type SeatView } from '@unpoker/core';
+import { handName, type Card as CardT, type GameView, type SeatView } from '@unpoker/core';
 import { Card } from '../components/Card.tsx';
 import { Chips, ConnBadge, Gauge, signed, Toast } from '../components/bits.tsx';
-import { provisionalRank, revealOdds, rouletteSchedule, ROULETTE_SPIN_MS, type HandOdds } from '../game.ts';
+import { provisionalRank, revealOdds, type HandOdds } from '../game.ts';
 import { useRoom, type Room, type RoomView } from '../net.ts';
-import { setSoundOn, sfx, soundOn } from '../sound.ts';
+import { RuleSettings, useJoinQr } from '../components/RoomSettings.tsx';
+import { Board, PauseButton, SoundButton, stampDelay, useSwapAnimation, useTableSounds } from '../components/TableBits.tsx';
+import { sfx } from '../sound.ts';
 import './table.css';
 
 export function TableScreen({ roomId, navigate }: { roomId: string | null; navigate: (path: string, replace?: boolean) => void }) {
@@ -75,16 +76,7 @@ function useWakeLock() {
 // ---------------------------------------------------------------- 待機
 
 function Lobby({ room, s }: { room: Room; s: RoomView }) {
-  const joinUrl = `${location.origin}/play/${s.roomId}`;
-  const [qr, setQr] = useState('');
-  useEffect(() => {
-    void QRCode.toString(joinUrl, { type: 'svg', margin: 0, color: { dark: '#221d19', light: '#f2ecdc' } }).then(setQr);
-  }, [joinUrl]);
-  // 古いルームの設定には持ち回りの項目が無いので、既定値で補う
-  const c = { ...DEFAULT_CONFIG, ...s.config };
-  const set = (patch: Partial<typeof c>) => room.send({ t: 'configure', config: { ...c, ...patch } });
-  const rotating = c.betMode === 'rotating';
-  const n = s.players.length;
+  const qr = useJoinQr(s.roomId);
   return (
     <div className="lobby">
       <section className="lobby-join">
@@ -118,133 +110,8 @@ function Lobby({ room, s }: { room: Room; s: RoomView }) {
           })}
         </ul>
         <h2 className="lobby-h">ルール設定</h2>
-        <div className="settings">
-          <Stepper label="最初の持ち点" value={c.initialChips} step={100} big={1000} min={500} max={10000} onChange={(v) => set({ initialChips: v })} />
-          <Segmented
-            label="ベット方式"
-            value={c.betMode ?? 'fixed'}
-            options={[
-              ['fixed', '固定'],
-              ['rotating', '持ち回り'],
-            ]}
-            onChange={(v) => set({ betMode: v })}
-          />
-          {!rotating ? (
-            <Stepper label="ベット額" value={c.bet} step={10} big={100} min={10} max={1000} onChange={(v) => set({ bet: v })} />
-          ) : (
-            <>
-              <Stepper
-                label="最低ベット"
-                value={c.minBet!}
-                step={10}
-                big={100}
-                min={10}
-                max={1000}
-                onChange={(v) => set({ minBet: v, maxBet: c.maxBet !== null && c.maxBet! < v ? v : c.maxBet })}
-              />
-              <Stepper
-                label="最高ベット"
-                value={c.maxBet ?? 1010}
-                step={10}
-                big={100}
-                min={c.minBet!}
-                max={1010}
-                format={(v) => (v > 1000 ? '上限なし' : v.toLocaleString())}
-                onChange={(v) => set({ maxBet: v > 1000 ? null : v })}
-              />
-              <Segmented
-                label="刻み幅"
-                value={String(c.betStep)}
-                options={[
-                  ['10', '10'],
-                  ['50', '50'],
-                  ['100', '100'],
-                ]}
-                onChange={(v) => set({ betStep: Number(v) })}
-              />
-            </>
-          )}
-          <Segmented
-            label="持ち時間"
-            value={c.timeLimit === false ? 'off' : 'on'}
-            options={[
-              ['on', 'あり'],
-              ['off', 'なし'],
-            ]}
-            onChange={(v) => set({ timeLimit: v === 'on' })}
-          />
-          <Stepper
-            label="ゲーム数"
-            value={c.maxGames ?? 0}
-            step={1}
-            big={5}
-            min={0}
-            max={50}
-            format={(v) => (v === 0 ? '無制限' : `${v} ゲーム`)}
-            onChange={(v) => set({ maxGames: v === 0 ? null : v })}
-          />
-        </div>
-        <button className="btn btn-shu btn-wide start" disabled={n < 3} onClick={() => room.send({ t: 'start' })}>
-          {n < 3 ? `あと ${3 - n} 人で始められます` : `${n} 人で対局を始める`}
-        </button>
-        {(rotating || c.timeLimit === false) && (
-          <p className="lobby-hint small">
-            {[
-              rotating && `持ち回り: 親がゲームごとにスマホでベット額を決めます${c.timeLimit === false ? '' : '（30 秒で最低ベット）'}`,
-              c.timeLimit === false && '持ち時間なし: 時間切れで進めず、全員の操作を待ちます',
-            ]
-              .filter(Boolean)
-              .join('。')}
-          </p>
-        )}
+        <RuleSettings room={room} s={s} />
       </section>
-    </div>
-  );
-}
-
-function Segmented<T extends string>(props: { label: string; value: T; options: [T, string][]; onChange: (v: T) => void }) {
-  return (
-    <div className="stepper" role="radiogroup" aria-label={props.label}>
-      <span className="st-label">{props.label}</span>
-      <div className="seg">
-        {props.options.map(([v, text]) => (
-          <button key={v} type="button" role="radio" aria-checked={props.value === v} className={`seg-btn${props.value === v ? ' on' : ''}`} onClick={() => props.onChange(v)}>
-            {text}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function Stepper(props: {
-  label: string;
-  value: number;
-  step: number;
-  big: number;
-  min: number;
-  max: number;
-  format?: (v: number) => string;
-  onChange: (v: number) => void;
-}) {
-  const { label, value, step, big, min, max, format = (v) => v.toLocaleString(), onChange } = props;
-  const clamp = (v: number) => Math.max(min, Math.min(max, v));
-  return (
-    <div className="stepper">
-      <span className="st-label">{label}</span>
-      <button className="st-btn" aria-label={`${label}を ${big} 減らす`} onClick={() => onChange(clamp(value - big))}>
-        «
-      </button>
-      <button className="st-btn" aria-label={`${label}を ${step} 減らす`} onClick={() => onChange(clamp(value - step))}>
-        −
-      </button>
-      <span className="st-value">{format(value)}</span>
-      <button className="st-btn" aria-label={`${label}を ${step} 増やす`} onClick={() => onChange(clamp(value + step))}>
-        ＋
-      </button>
-      <button className="st-btn" aria-label={`${label}を ${big} 増やす`} onClick={() => onChange(clamp(value + big))}>
-        »
-      </button>
     </div>
   );
 }
@@ -272,7 +139,7 @@ function TableGame({ room, s, g }: { room: Room; s: RoomView; g: GameView }) {
     return g.seats.map((x) => revealOdds(x, g.board, visible));
   }, [visibleKey]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
-    <div className={`game${g.phase === 'swap' && !swapDone.intro && !swapDone.revealNew ? ' swapping' : ''}`}>
+    <div className={`game${g.phase === 'swap' && !swapDone.intro && !swapDone.revealNew ? ' swapping' : ''}`} data-phase={g.phase}>
       <header className="game-head">
         <span>
           {s.gameNo} ゲーム目{s.config.maxGames ? ` ／ ${s.config.maxGames}` : ''}
@@ -326,64 +193,6 @@ function TableGame({ room, s, g }: { room: Room; s: RoomView; g: GameView }) {
 }
 
 const rotatingBet = (s: RoomView) => s.config.betMode === 'rotating';
-
-/** 効果音のオン・オフ（端末ごとに覚える） */
-function SoundButton() {
-  const [on, setOn] = useState(soundOn());
-  return (
-    <button
-      type="button"
-      className={`pause-btn${on ? '' : ' on'}`}
-      aria-pressed={!on}
-      onClick={() => {
-        setSoundOn(!on);
-        setOn(!on);
-        if (!on) sfx.stamp();
-      }}
-    >
-      {on ? '音 あり' : '音 なし'}
-    </button>
-  );
-}
-
-/** テーブルの効果音: 状態の変化に合わせて鳴らす（演出の時間に揃える） */
-function useTableSounds(s: RoomView, g: GameView) {
-  const prev = useRef<{ gameNo: number; phase: string; revealed: number; declarers: number; joiners: number } | null>(null);
-  useEffect(() => {
-    const cur = {
-      gameNo: s.gameNo,
-      phase: g.phase,
-      revealed: g.seats.reduce((a, x) => a + x.revealed.length, 0),
-      declarers: g.challenge?.declarers.length ?? 0,
-      joiners: g.challenge?.joiners.length ?? 0,
-    };
-    const p = prev.current;
-    prev.current = cur;
-    if (!p) return; // 開いた直後（途中から開いた場合）は鳴らさない
-    if (p.gameNo !== cur.gameNo) {
-      for (let i = 0; i < 5; i++) sfx.flip(i * 0.09); // 配る
-      return;
-    }
-    if (cur.phase !== p.phase) {
-      if (cur.phase === 'boardReveal') g.seats.forEach((_, k) => sfx.flip(0.4 + k * 1.1));
-      if (cur.phase === 'ranking') g.seats.forEach((_, i) => sfx.stamp(stampDelay(g, i)));
-      if (cur.phase === 'result') {
-        sfx.win(0.2);
-        if (g.result?.nut) sfx.nut(1.1);
-      }
-    }
-    if (cur.revealed > p.revealed) sfx.flip();
-    if (cur.declarers > p.declarers) sfx.challenge();
-  });
-}
-
-function PauseButton({ room, s }: { room: Room; s: RoomView }) {
-  return (
-    <button type="button" className={`pause-btn${s.paused ? ' on' : ''}`} aria-pressed={s.paused} onClick={() => room.send({ t: 'pause', paused: !s.paused })}>
-      {s.paused ? '▶ 持ち時間を再開' : 'Ⅱ 持ち時間を止める'}
-    </button>
-  );
-}
 
 /** 持ち回り方式: 親がベット額を選んでいる間のテーブル */
 function TableBetting({ room, s }: { room: Room; s: RoomView }) {
@@ -502,149 +311,6 @@ function Banner({ g, names }: { g: GameView; names: string[] }) {
       )}
     </div>
   );
-}
-
-const BOARD_W = 92;
-
-function Board({ g, swap }: { g: GameView; swap: SwapAnim }) {
-  const initialCount = g.boardOwners.filter((o) => o === null).length;
-  const slots = 5;
-  return (
-    <div className="board" aria-label="場札">
-      {Array.from({ length: slots }, (_, k) => {
-        let card: CardT | null = g.board[k] ?? null;
-        const exists = k < g.board.length;
-        const isSwapTarget = g.challenge?.swap?.index === k;
-        if (isSwapTarget && !swap.done) card = g.challenge!.swap!.removed;
-        // 場札公開: 伏せ札を 1 枚ずつ間を置いてめくる
-        const delay = g.phase === 'boardReveal' && k >= initialCount ? 0.4 + (k - initialCount) * 1.1 : 0;
-        return (
-          <div className="board-slot" key={k}>
-            {exists ? (
-              <motion.div
-                initial={{ opacity: 0, y: -30, scale: 0.9 }}
-                animate={{
-                  opacity: isSwapTarget && swap.burning ? 0 : 1,
-                  y: 0,
-                  scale: isSwapTarget && swap.burning ? 0.6 : 1,
-                  filter: isSwapTarget && swap.burning ? 'brightness(2) sepia(1) hue-rotate(-30deg)' : 'none',
-                }}
-                transition={{ duration: isSwapTarget && swap.burning ? 0.7 : 0.4 }}
-              >
-                <Card
-                  key={isSwapTarget && swap.done ? 'added' : 'orig'}
-                  card={card}
-                  faceUp={card !== null && (!isSwapTarget || !swap.done || swap.revealNew)}
-                  width={BOARD_W}
-                  delay={delay}
-                  win={g.phase === 'result'}
-                />
-              </motion.div>
-            ) : (
-              <div className="card-slot" style={{ ['--card-w' as string]: `${BOARD_W}px` }} />
-            )}
-            {g.phase === 'swap' && swap.highlight === k && <motion.div layoutId="roulette" className="roulette" transition={{ duration: 0.08 }} />}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-interface SwapAnim {
-  /** 勝負の顔ぶれを発表している（ルーレットの前） */
-  intro: boolean;
-  highlight: number | null;
-  burning: boolean;
-  done: boolean;
-  revealNew: boolean;
-}
-
-/** 勝負の顔ぶれを発表する長さ（ミリ秒）。この間は宣言した人が「回す」を押しても、光は発表の後から回り始める */
-export const SWAP_INTRO_MS = 2800;
-
-/**
- * 入れ替えの演出（山場 2）。ルーレットは、チャレンジを宣言した人がスマホで回して止める
- *   顔ぶれの発表（挑戦・受けて立つ・便乗を順に押印）
- *   → 回すのを待つ → 回っている間は光が一定の速さで回り続ける（拍子木と太鼓の拍）
- *   → ストップで、今の位置からだんだん遅くなって入れ替える札で止まる（太鼓の連打）
- *   → 太鼓の一打で札が燃えて消える → 拍子木で新しい札をめくる
- * どの札を入れ替えるかは、ストップを押したときにサーバーがランダムに決める（押す時機で結果は変わらない）
- */
-function useSwapAnimation(g: GameView, gameNo: number): SwapAnim {
-  const ch = g.challenge;
-  const target = ch?.swap?.index ?? null;
-  const roulette = ch ? (ch.roulette ?? (ch.swap ? 'stopped' : 'ready')) : null;
-  const idle: SwapAnim = { intro: false, highlight: null, burning: false, done: false, revealNew: false };
-  const [st, setSt] = useState<SwapAnim>(idle);
-  const pos = useRef(-1); // 今光っている位置
-  const introFor = useRef<number | null>(null);
-  const finishFor = useRef<number | null>(null);
-
-  // 顔ぶれの発表: 入れ替えの場面に入った最初だけ
-  useEffect(() => {
-    if (g.phase !== 'swap' || roulette === 'stopped' || introFor.current === gameNo) return;
-    introFor.current = gameNo;
-    pos.current = -1;
-    setSt({ ...idle, intro: true });
-    const t = setTimeout(() => setSt((p) => ({ ...p, intro: false })), SWAP_INTRO_MS);
-    return () => clearTimeout(t);
-  }, [g.phase, gameNo, roulette]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // 回っている間: 一定の速さで回り続ける
-  useEffect(() => {
-    if (g.phase !== 'swap' || roulette !== 'spinning' || st.intro) return;
-    const iv = setInterval(() => {
-      pos.current = (pos.current + 1) % 5;
-      const p = pos.current;
-      setSt((s) => ({ ...s, highlight: p }));
-      sfx.tick();
-      if (p === 0) sfx.beat();
-    }, ROULETTE_SPIN_MS);
-    return () => clearInterval(iv);
-  }, [g.phase, roulette, st.intro]);
-
-  // 止めたら: 今の位置から減速して target で止まり、燃えて、新しい札をめくる
-  useEffect(() => {
-    if (target === null) {
-      if (g.phase !== 'swap') setSt(idle);
-      return;
-    }
-    if (g.phase !== 'swap') {
-      // 途中から開いた場合や結果の画面は、入れ替え後の状態で見せる
-      if (finishFor.current !== gameNo) setSt({ ...idle, done: true, revealNew: true });
-      return;
-    }
-    if (st.intro || finishFor.current === gameNo) return;
-    finishFor.current = gameNo;
-    const timers: ReturnType<typeof setTimeout>[] = [];
-    const at = (ms: number, f: () => void) => timers.push(setTimeout(f, ms));
-    const ticks = rouletteSchedule(target, 5, 2, pos.current, ROULETTE_SPIN_MS);
-    const end = ticks[ticks.length - 1]!.at;
-    sfx.drumroll(end / 1000);
-    for (const tk of ticks)
-      at(tk.at, () => {
-        pos.current = tk.index;
-        setSt((p) => ({ ...p, highlight: tk.index }));
-        sfx.tick();
-      });
-    at(end + 500, () => {
-      setSt((p) => ({ ...p, burning: true }));
-      sfx.don();
-      sfx.swap(0.05);
-    });
-    at(end + 1250, () => setSt({ ...idle, done: true }));
-    at(end + 1450, () => {
-      setSt((p) => ({ ...p, revealNew: true }));
-      sfx.flip();
-      sfx.kan(0.15);
-    });
-    return () => {
-      timers.forEach(clearTimeout);
-      finishFor.current = null; // 途中で外れたら、次に描くときにやり直す
-    };
-  }, [target, g.phase, gameNo, st.intro]); // eslint-disable-line react-hooks/exhaustive-deps
-  return st;
 }
 
 /** 宣言の瞬間（便乗を待つ間）: 「挑戦」の印を大きく押す */
@@ -813,13 +479,6 @@ function SeatPanel({ g, seat, sv, name, side, swapDone, odds }: { g: GameView; s
       </div>
     </div>
   );
-}
-
-/** 仮順位は最下位から順に押印し、1 位は最後（ux.md 3 章） */
-function stampDelay(g: GameView, seat: number): number {
-  const p = g.provisional!;
-  const order = [...p.scores.keys()].sort((a, b) => p.scores[a]! - p.scores[b]!);
-  return 0.3 + order.indexOf(seat) * 0.9;
 }
 
 function NutOverlay({ g }: { g: GameView }) {

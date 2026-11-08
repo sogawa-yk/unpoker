@@ -7,3 +7,5 @@ infra/*.tfstate*
 .obsidian-dir
 .data/
 .claude/launch.json
+test-results/
+playwright-report/

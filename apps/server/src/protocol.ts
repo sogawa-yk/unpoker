@@ -35,19 +35,21 @@ const token = z.string().min(20).max(100);
 export const ClientMsg = z.discriminatedUnion('t', [
   /** テーブル（iPad）がルームを作る */
   z.object({ t: z.literal('createRoom') }),
+  /** スマホがルームを作って、そのまま親機として参加する（テーブルなしで遊ぶ） */
+  z.object({ t: z.literal('hostRoom'), name: z.string().trim().min(1).max(12) }),
   /** スマホがルームに参加する */
   z.object({ t: z.literal('join'), roomId, name: z.string().trim().min(1).max(12) }),
   /** 再接続（テーブルもスマホも） */
   z.object({ t: z.literal('resume'), roomId, token }),
-  /** ルーム設定の変更（テーブル、待機中のみ） */
+  /** ルーム設定の変更（テーブルか親機、待機中のみ） */
   z.object({ t: z.literal('configure'), config: ConfigMsg }),
-  /** 待機中の参加者を外す（テーブル、待機中のみ） */
+  /** 待機中の参加者を外す（テーブルか親機、待機中のみ） */
   z.object({ t: z.literal('kick'), playerId: z.string() }),
-  /** 対局開始（テーブル） */
+  /** 対局開始（テーブルか親機） */
   z.object({ t: z.literal('start') }),
-  /** 結果確認の後、次のゲームへ（テーブル） */
+  /** 結果確認の後、次のゲームへ（テーブルか親機） */
   z.object({ t: z.literal('nextGame') }),
-  /** 持ち時間を止める・再開する（テーブル、対局中） */
+  /** 持ち時間を止める・再開する（テーブルか親機、対局中） */
   z.object({ t: z.literal('pause'), paused: z.boolean() }),
   /** 持ち回り方式で、親がベット額を決める（スマホ） */
   z.object({ t: z.literal('bet'), amount: z.number().int() }),
@@ -74,6 +76,8 @@ export interface RoomView {
   config: MatchConfig;
   players: PlayerView[];
   tableConnected: boolean;
+  /** テーブルなしで遊ぶルームの親機（ルームを作ったスマホのプレイヤー ID）。iPad で作ったルームは null */
+  hostId: string | null;
   you: { role: 'table' } | { role: 'player'; playerId: string };
   gameNo: number;
   dealerId: string | null;

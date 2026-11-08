@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { Card } from './components/Card.tsx';
 import { DevScreen } from './screens/Dev.tsx';
 import { PlayScreen } from './screens/Play.tsx';
+import { HostScreen } from './screens/PlayTable.tsx';
 import { TableScreen } from './screens/Table.tsx';
 import { recentRooms } from './net.ts';
 import { installAudioUnlock } from './sound.ts';
@@ -12,6 +13,7 @@ import './styles.css';
 //   /                 … はじめの画面
 //   /table[/ROOMID]   … テーブル（iPad）
 //   /play/ROOMID      … 手札（スマホ）
+//   /host             … iPad なしで遊ぶとき、スマホでテーブルを作る（作ったスマホが親機）
 //   /dev              … 開発用の遊び場（手元の環境だけ）
 function App() {
   const [path, setPath] = useState(location.pathname);
@@ -30,6 +32,7 @@ function App() {
   if (table) return <TableScreen key={table[1] ?? 'new'} roomId={table[1] ?? null} navigate={navigate} />;
   const play = path.match(/^\/play\/([A-Za-z2-9]{6})\/?$/);
   if (play) return <PlayScreen roomId={play[1]!.toUpperCase()} />;
+  if (path === '/host') return <HostScreen navigate={navigate} />;
   // 開発用の遊び場は、手元の環境（localhost と LAN）でだけ開く
   if (path === '/dev' && /^(localhost|127\.0\.0\.1|192\.168\.|10\.)/.test(location.hostname)) return <DevScreen />;
   return <Home navigate={navigate} />;
@@ -47,7 +50,7 @@ function Home({ navigate }: { navigate: (p: string) => void }) {
         <Card card={45} faceUp width={84} style={{ transform: 'rotate(8deg) translateY(6px)' }} />
       </div>
       <h1 className="home-title">unpoker</h1>
-      <p className="home-lead">iPad をテーブルに、スマホを手札に。3〜4 人で遊ぶ、運試しのポーカー</p>
+      <p className="home-lead">iPad をテーブルに、スマホを手札に。3〜4 人で遊ぶ、運試しのポーカー。iPad が無ければ、スマホだけでも遊べます</p>
       <div className="home-actions">
         {recent.length > 0 && (
           <div className="home-recent">
@@ -60,6 +63,9 @@ function Home({ navigate }: { navigate: (p: string) => void }) {
         )}
         <button className="btn btn-shu" onClick={() => navigate('/table')}>
           この端末をテーブルにする
+        </button>
+        <button className="btn" onClick={() => navigate('/host')}>
+          iPad なしで、スマホだけで遊ぶ
         </button>
         <form
           className="home-join"
