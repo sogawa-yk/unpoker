@@ -103,9 +103,11 @@ export class Rooms {
     return r;
   }
 
-  private requireTable(conn: Conn): Room {
-    if (conn.role !== 'table') throw new RoomError('テーブルだけができる操作');
-    return this.room(conn);
+  /** テーブル（iPad）か、テーブルなしのルームの親機だけができる操作 */
+  private requireHost(conn: Conn): Room {
+    const r = this.room(conn);
+    if (conn.role === 'table' || (conn.role === 'player' && conn.playerId !== null && conn.playerId === r.data.hostId)) return r;
+    throw new RoomError('テーブルだけができる操作');
   }
 
   private dispatch(conn: Conn, msg: ClientMsg) {
@@ -117,6 +119,16 @@ export class Rooms {
         const r = this.create();
         Object.assign(conn, { role: 'table', roomId: r.id, playerId: null });
         conn.send({ t: 'welcome', roomId: r.id, token: r.data.tableToken, role: 'table' });
+        r.attach(conn);
+        void r.flush();
+        return;
+      }
+      case 'hostRoom': {
+        if (conn.roomId) throw new RoomError('すでにルームに入っている');
+        const r = this.create();
+        const p = r.join(msg.name, true);
+        Object.assign(conn, { role: 'player', roomId: r.id, playerId: p.id });
+        conn.send({ t: 'welcome', roomId: r.id, token: p.token, role: 'player', playerId: p.id });
         r.attach(conn);
         void r.flush();
         return;
@@ -148,15 +160,15 @@ export class Rooms {
         return;
       }
       case 'configure':
-        return this.requireTable(conn).configure(msg.config);
+        return this.requireHost(conn).configure(msg.config);
       case 'kick':
-        return this.requireTable(conn).kick(msg.playerId);
+        return this.requireHost(conn).kick(msg.playerId);
       case 'start':
-        return this.requireTable(conn).start();
+        return this.requireHost(conn).start();
       case 'nextGame':
-        return this.requireTable(conn).nextGame();
+        return this.requireHost(conn).nextGame();
       case 'pause': {
-        const r = this.requireTable(conn);
+        const r = this.requireHost(conn);
         return msg.paused ? r.pause() : r.unpause();
       }
       case 'bet': {
