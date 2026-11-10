@@ -4,10 +4,10 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { handName, type Card as CardT, type GameView, type SeatView } from '@unpoker/core';
 import { Card } from '../components/Card.tsx';
 import { Chips, ConnBadge, Gauge, signed, Toast } from '../components/bits.tsx';
-import { provisionalRank, revealOdds, type HandOdds } from '../game.ts';
+import { carryNext, potNow, provisionalRank, revealOdds, type HandOdds } from '../game.ts';
 import { useRoom, type Room, type RoomView } from '../net.ts';
 import { RuleSettings, useJoinQr } from '../components/RoomSettings.tsx';
-import { Board, PauseButton, SoundButton, stampDelay, useSwapAnimation, useTableSounds } from '../components/TableBits.tsx';
+import { Board, PauseButton, SoundButton, stampDelay, useChallengeBanner, useSwapAnimation, useTableSounds } from '../components/TableBits.tsx';
 import { sfx } from '../sound.ts';
 import './table.css';
 
@@ -127,7 +127,7 @@ function TableGame({ room, s, g }: { room: Room; s: RoomView; g: GameView }) {
   const names = g.seats.map((sv) => s.players.find((p) => p.id === sv.id)?.name ?? '？');
   const sides = SIDES[g.seats.length] ?? SIDES[4]!;
   const swapDone = useSwapAnimation(g, s.gameNo);
-  const nextCarry = g.seats.reduce((a, x) => a + x.peekFee, 0);
+  const nextCarry = carryNext(g);
   useTableSounds(s, g);
   // 公開フェーズの見込み: テーブルに見えている札（場札とめくれた札）だけから計算する
   const visibleKey = g.phase === 'reveal' ? JSON.stringify([g.board, g.seats.map((x) => x.cards)]) : '';
@@ -147,13 +147,16 @@ function TableGame({ room, s, g }: { room: Room; s: RoomView; g: GameView }) {
         <span className={rotatingBet(s) ? 'bet-now' : undefined}>
           ベット <Chips n={g.bet} />
         </span>
+        <span className="pot" title="全員の基本ベットとチャレンジの参加費。このゲームの勝者が受け取る">
+          現在のポット <Chips n={potNow(g)} />
+        </span>
         {g.carryIn > 0 && (
           <span className="carry" title="このゲームの勝者が受け取る">
             持ち越しポット <Chips n={g.carryIn} />
           </span>
         )}
         {nextCarry > 0 && (
-          <span className="carry next" title="追加めくりの料金。次のゲームの勝者が受け取る">
+          <span className="carry next" title="追加めくりと AI 相談の料金。次のゲームの勝者が受け取る">
             次へ <Chips n={nextCarry} />
           </span>
         )}
@@ -315,15 +318,7 @@ function Banner({ g, names }: { g: GameView; names: string[] }) {
 
 /** 宣言の瞬間（便乗を待つ間）: 「挑戦」の印を大きく押す */
 function ChallengeBanner({ g, s, names }: { g: GameView; s: RoomView; names: string[] }) {
-  const [shown, setShown] = useState(false);
-  const seen = useRef<number | null>(null);
-  useEffect(() => {
-    if (g.phase !== 'join' || !g.challenge || seen.current === s.gameNo) return;
-    seen.current = s.gameNo;
-    setShown(true);
-    const t = setTimeout(() => setShown(false), 2600);
-    return () => clearTimeout(t);
-  }, [g.phase, s.gameNo]); // eslint-disable-line react-hooks/exhaustive-deps
+  const shown = useChallengeBanner(g, s.gameNo);
   const ch = g.challenge;
   return (
     <AnimatePresence>

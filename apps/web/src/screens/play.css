@@ -69,6 +69,51 @@
   margin-left: auto;
   font-size: 13px;
 }
+.pg-pots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 13px;
+}
+.pg-pots b {
+  font-variant-numeric: tabular-nums;
+}
+.chh-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+.chh-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgb(255 255 255 / 0.05);
+  font-size: 14px;
+}
+.chh-list li.leader {
+  outline: 1px solid var(--kin);
+}
+.chh-list li.me .chh-name {
+  font-weight: 700;
+}
+.chh-role {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgb(255 255 255 / 0.1);
+}
+.chh-hand {
+  margin-left: auto;
+  font-weight: 700;
+}
+.chh-lead {
+  font-size: 11px;
+  color: var(--kin);
+}
 .pg-gauge {
   min-height: 3px;
 }
@@ -606,6 +651,13 @@
     0 0 0 10px rgb(207 66 39 / 0.3),
     0 10px 24px rgb(0 0 0 / 0.45);
   animation: stop-pulse 0.9s ease-in-out infinite;
+}
+.roulette-btn:disabled {
+  opacity: 0.6;
+  animation: none;
+}
+.roulette-wait {
+  margin: 0;
 }
 @keyframes stop-pulse {
   50% {

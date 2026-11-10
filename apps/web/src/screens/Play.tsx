@@ -6,7 +6,8 @@ import type { GameActionMsg } from '../../../server/src/protocol.ts';
 import { Card, cardName } from '../components/Card.tsx';
 import { AdvicePanel, adviceNow, arrangePlan } from '../components/Advice.tsx';
 import { Chips, ConnBadge, Gauge, HoldButton, PaidButton, StackChips, signed, Toast } from '../components/bits.tsx';
-import { provisionalRank } from '../game.ts';
+import { carryNext, challengeHands, potNow, provisionalRank, shownBoard, type ChallengeRole } from '../game.ts';
+import { useSwapAnimation } from '../components/TableBits.tsx';
 import { savedToken, useRoom, type Room, type RoomView } from '../net.ts';
 import { FinalList, HostControls, HostLobby, NextGame, SwapBoard, TableStrip, TablelessCtx, tablelessOf, useTableless } from './PlayTable.tsx';
 import { sfx } from '../sound.ts';
@@ -14,13 +15,13 @@ import './play.css';
 
 export function PlayScreen({ roomId }: { roomId: string }) {
   const params = new URLSearchParams(location.search);
-  // 開発用: ?name=xxx で自動参加、?bot=1 で自動操作
+  // 開発用: ?name=xxx で自動参加、?bot=1 で自動操作、?mash=1 でルーレットを連打する（演出が飛ばないかの確認用）
   const autoName = params.get('name');
   const room = useRoom(roomId, 'player', (send) => {
     if (autoName) send({ t: 'join', roomId, name: autoName });
   });
   const s = room.state;
-  useBot(room, params.get('bot') === '1');
+  useBot(room, params.get('bot') === '1', params.get('mash') === '1');
   const hasToken = savedToken(roomId, 'player') !== null;
   const notFound = room.error?.code === 'room_not_found';
   return (
@@ -173,6 +174,7 @@ function PhoneGameBody({
         )}
         <span className="pg-bet muted">ベット {g.bet}</span>
       </header>
+      <PotRow g={g} />
       <MyGauge room={room} g={g} />
       <HostControls room={room} s={s} g={g} />
       <main className="pg-main">
@@ -554,6 +556,9 @@ function AfterPlacement({
   const you = g.you!;
   const prov = g.provisional;
   const res = g.result;
+  // 入れ替えの演出が新しい札をめくるまでは、入れ替える前の場札を見せる（iPad より先にネタばらししない）
+  const swapAnim = useSwapAnimation(g, s.gameNo, false);
+  const board = shownBoard(g, swapAnim.revealNew);
   switch (g.phase) {
     case 'boardReveal':
       return <MySets g={g} me={me} hint="場札を公開しています" showBoard />;
@@ -584,8 +589,9 @@ function AfterPlacement({
           {tableless.on && g.phase === 'swap' ? (
             <SwapBoard s={s} g={g} />
           ) : (
-            <MiniBoard cards={g.board.filter((c): c is CardT => c !== null)} label={g.phase === 'swap' ? '入れ替え後の場札' : '場札'} />
+            <MiniBoard cards={board} label={g.phase === 'swap' && swapAnim.revealNew ? '入れ替え後の場札' : '場札'} />
           )}
+          {(g.phase === 'join' || g.phase === 'swap') && g.challenge && <ChallengeHands g={g} board={board} name={name} />}
           <SetsView me={me} compact best={prov!.bestSet[you]} />
           {g.phase === 'declare' && lastMe && !me.declareDone && (
             <Decision
@@ -660,8 +666,58 @@ function waitingNote(g: GameView, you: number, name: (i: number) => string, tabl
   }
 }
 
+/** 今のポットと持ち越しポットを分けて出す */
+function PotRow({ g }: { g: GameView }) {
+  const next = carryNext(g);
+  return (
+    <div className="pg-pots" aria-label="ポット">
+      <span title="全員の基本ベットとチャレンジの参加費。このゲームの勝者が受け取ります">
+        現在のポット <b>{potNow(g).toLocaleString()}</b>
+      </span>
+      <span title="前のゲームの追加めくりと AI 相談の料金。このゲームの勝者が受け取ります">
+        持ち越しポット <b>{g.carryIn.toLocaleString()}</b>
+      </span>
+      {next > 0 && (
+        <span className="muted" title="このゲームの追加めくりと AI 相談の料金。次のゲームの勝者が受け取ります">
+          次へ {next.toLocaleString()}
+        </span>
+      )}
+    </div>
+  );
+}
+
+const ROLE_LABEL: Record<ChallengeRole, string> = { declarer: '挑戦', forced: '受けて立つ', joiner: '便乗' };
+
+/** チャレンジ中: 参加している人ごとの今の役（場札がめくれるたびに更新） */
+function ChallengeHands({ g, board, name }: { g: GameView; board: CardT[]; name: (i: number) => string }) {
+  const rows = challengeHands(g, board);
+  if (rows.length === 0) return null;
+  return (
+    <ul className="chh-list" aria-label="勝負の顔ぶれと今の役">
+      {rows.map((r) => (
+        <motion.li key={r.seat} layout className={`${r.leader ? 'leader' : ''}${r.seat === g.you ? ' me' : ''}`}>
+          <span className="chh-role">{ROLE_LABEL[r.role]}</span>
+          <span className="chh-name">{r.seat === g.you ? 'あなた' : name(r.seat)}</span>
+          <motion.span key={r.name} className="chh-hand" initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }}>
+            {r.name}
+          </motion.span>
+          {r.leader && <span className="chh-lead">いま優勢</span>}
+        </motion.li>
+      ))}
+    </ul>
+  );
+}
+
 /** チャレンジを宣言した人のスマホ: 場札入れ替えのルーレットを回して、止める */
 function RouletteControl({ spinning, where, onPress }: { spinning: boolean; where: string; onPress: (cmd: 'start' | 'stop') => void }) {
+  // 押した後、サーバーが受け付けるまで（顔ぶれの発表中や、回り始めた直後）は「まもなく」と出し、連打しても 1 回だけ送る
+  const [pressed, setPressed] = useState(false);
+  useEffect(() => setPressed(false), [spinning]);
+  const press = () => {
+    if (pressed) return;
+    setPressed(true);
+    onPress(spinning ? 'stop' : 'start');
+  };
   return (
     <motion.section className="decision roulette-ctl" initial={{ y: 30, opacity: 0 }} animate={{ y: 0, opacity: 1 }}>
       <h2 className="decision-title">{spinning ? 'いつでも止められます' : 'ルーレットを回してください'}</h2>
@@ -675,10 +731,13 @@ function RouletteControl({ spinning, where, onPress }: { spinning: boolean; wher
         initial={{ scale: 0.8 }}
         animate={{ scale: 1 }}
         whileTap={{ scale: 0.92 }}
-        onClick={() => onPress(spinning ? 'stop' : 'start')}
+        onClick={press}
+        disabled={pressed}
+        aria-busy={pressed}
       >
         {spinning ? 'ストップ' : '回す'}
       </motion.button>
+      {pressed && <p className="muted roulette-wait">{spinning ? 'まもなく止まります…' : 'まもなく回ります…'}</p>}
     </motion.section>
   );
 }
@@ -763,7 +822,7 @@ function SetsView({ me, onFlip, compact, best }: { me: SeatView; onFlip?: (k: nu
 
 
 /** 開発用のボット: 状態を見て、少し間を置いて合法手を 1 つ送る */
-function useBot(room: Room, on: boolean) {
+function useBot(room: Room, on: boolean, mash = false) {
   const g = room.state?.game;
   const key = room.state ? `${room.state.serverTime}` : '';
   useEffect(() => {
@@ -795,6 +854,14 @@ function useBot(room: Room, on: boolean) {
     } else if (g.phase === 'join' && g.challenge?.optional.includes(g.you) && !me.joinDone) {
       a = { type: 'join', yes: Math.random() < 0.4 };
     } else if (g.phase === 'swap' && g.challenge?.roller === g.you && g.challenge.roulette !== 'stopped') {
+      if (mash) {
+        // 画面が切り替わった直後に、回す・止めるを何度も押す
+        for (let i = 0; i < 4; i++) {
+          room.send({ t: 'action', action: { type: 'roulette', cmd: 'start' } });
+          room.send({ t: 'action', action: { type: 'roulette', cmd: 'stop' } });
+        }
+        return;
+      }
       const cmd = g.challenge.roulette === 'ready' ? 'start' : 'stop';
       const t = setTimeout(() => room.send({ t: 'action', action: { type: 'roulette', cmd } }), cmd === 'start' ? 3500 : 2500);
       return () => clearTimeout(t);

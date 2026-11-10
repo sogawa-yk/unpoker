@@ -114,3 +114,48 @@ export function rouletteSchedule(target: number, slots = 5, laps = 2, start = -1
 
 /** ルーレットが回り続けている間、光が 1 枚進む間隔（ミリ秒） */
 export const ROULETTE_SPIN_MS = 85;
+
+/** 今のポット: 全員の基本ベット ＋ チャレンジの参加費（このゲームの勝者が受け取る） */
+export const potNow = (g: GameView): number => g.seats.reduce((a, x) => a + x.baseBet + x.challengeFee, 0);
+
+/** このゲームで払われた追加めくりと AI 相談の料金（次のゲームの持ち越しポットになる） */
+export const carryNext = (g: GameView): number => g.seats.reduce((a, x) => a + x.peekFee + x.adviceFee, 0);
+
+export type ChallengeRole = 'declarer' | 'forced' | 'joiner';
+
+/**
+ * 画面に見せてよい場札（入れ替えの演出が新しい札をめくるまでは、入れ替える前の場札）。
+ * revealed は演出が新しい札を見せたか
+ */
+export function shownBoard(g: GameView, revealed: boolean): Card[] {
+  const b = g.board.filter((c): c is Card => c !== null);
+  const sw = g.challenge?.swap;
+  if (!sw || revealed || g.phase !== 'swap') return b;
+  const out = [...b];
+  out[sw.index] = sw.removed;
+  return out;
+}
+
+/** チャレンジに参加している人ごとの、今の場札での役（強い順。同じ強さは席順） */
+export function challengeHands(g: GameView, board: Card[]): { seat: number; role: ChallengeRole; score: HandScore; name: string; leader: boolean }[] {
+  const ch = g.challenge;
+  if (!ch || board.length < 5) return [];
+  const roles = new Map<number, ChallengeRole>();
+  ch.forced.forEach((i) => roles.set(i, 'forced'));
+  ch.declarers.forEach((i) => roles.set(i, 'declarer'));
+  ch.joiners.forEach((i) => roles.set(i, 'joiner'));
+  const rows = [...roles].map(([seat, role]) => {
+    const sv = g.seats[seat]!;
+    let score = -1;
+    for (const [x, y] of sv.sets ?? []) {
+      const a = sv.cards[x];
+      const b = sv.cards[y];
+      if (a === null || a === undefined || b === null || b === undefined) continue;
+      score = Math.max(score, evaluate([...board, a, b]));
+    }
+    return { seat, role, score, name: score < 0 ? '？' : handName(score), leader: false };
+  });
+  const top = Math.max(...rows.map((r) => r.score));
+  rows.forEach((r) => (r.leader = r.score === top));
+  return rows.sort((a, b) => b.score - a.score || a.seat - b.seat);
+}
