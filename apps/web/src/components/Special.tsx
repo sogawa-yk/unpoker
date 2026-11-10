@@ -9,6 +9,9 @@ import { HoldButton } from './bits.tsx';
 import './special.css';
 
 const SUITS = ['♠', '♥', '♦', '♣'];
+/** 配布の発表の進み具合（ルームと対局ごと）。画面が切り替わっても最初からやり直さない */
+const dealProgress = new Map<string, number>();
+
 /** 「使いますか？」の確認の持ち時間（rules.md B-10） */
 export const SPECIAL_ASK_MS = 10_000;
 
@@ -252,17 +255,29 @@ export function SpecialUsedBanner({ g, names }: { g: GameView; names: string[] }
  * iPad（対局の始め）: 配った特殊効果カードの発表。当てはまった人が複数なら、名前の上を光が回って 1 人に止まる。
  * どの条件で配ったか、カードの種類は伏せる
  */
-export function SpecialDealShow({ s }: { s: RoomView }) {
+export function SpecialDealShow({ s, overlay }: { s: RoomView; overlay?: boolean }) {
   const deals = s.special?.deals ?? [];
   const name = (id: string) => s.players.find((p) => p.id === id)?.name ?? '？';
-  const [step, setStep] = useState(0); // 何件目まで決まったか
+  const key = `${s.roomId}:${s.matchNo}`;
+  // 何件目まで決まったか。画面が切り替わっても（クレジットを買う画面 → ゲーム）続きから見せる
+  const [step, setStepRaw] = useState(() => dealProgress.get(key) ?? 0);
+  const setStep = (f: (x: number) => number) =>
+    setStepRaw((x) => {
+      const v = f(x);
+      dealProgress.set(key, v);
+      return v;
+    });
   const [lit, setLit] = useState<string | null>(null);
-  useEffect(() => {
-    setStep(0);
-  }, [s.matchNo]);
+  const [gone, setGone] = useState(false);
   useEffect(() => {
     const d = deals[step];
-    if (!d) return;
+    if (!d) {
+      if (overlay && deals.length) {
+        const t = setTimeout(() => setGone(true), 1800);
+        return () => clearTimeout(t);
+      }
+      return;
+    }
     let i = 0;
     const order = d.candidates.length > 1 ? d.candidates : [d.recipient];
     const spins = d.candidates.length > 1 ? 12 + order.indexOf(d.recipient) : 0;
@@ -277,9 +292,10 @@ export function SpecialDealShow({ s }: { s: RoomView }) {
     }, 110);
     return () => clearInterval(iv);
   }, [step, deals.length]); // eslint-disable-line react-hooks/exhaustive-deps
-  if (deals.length === 0) return null;
+  if (deals.length === 0 || (overlay && gone)) return null;
+  if (overlay && (dealProgress.get(key) ?? 0) >= deals.length && step >= deals.length && gone) return null;
   return (
-    <section className="sp-deals" aria-label="特殊効果カードの配布">
+    <section className={`sp-deals${overlay ? ' overlay' : ''}`} aria-label="特殊効果カードの配布">
       <p className="sp-deals-title">特殊効果カードを配ります（前の対局の成績から）</p>
       {deals.map((d, k) => (
         <div key={k} className={`sp-deal${k < step ? ' done' : ''}`}>

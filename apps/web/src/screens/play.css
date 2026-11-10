@@ -726,3 +726,8 @@
 .buy-value small {
   color: var(--hakuai);
 }
+
+/* 特殊効果カードで手札が 7 枚でないとき（5・9・11 枚）: ずらさずに並べる */
+.hand7.many > div:nth-child(n + 5) {
+  transform: none;
+}

@@ -8,7 +8,7 @@ import type { SpecialKind } from './special.ts';
 import type { PlayerStats } from './stats.ts';
 
 /** ルールの版。遊び方が変わったら上げる（記録にこの版を残し、分析のときに版ごとに分ける） */
-export const RULES_VERSION = '2026-11-10.3'; // .2: 場札の構成（B-8）と 2 人プレイ ／ .3: 前払いクレジット（B-11）
+export const RULES_VERSION = '2026-11-11.4'; // .2: 場札の構成（B-8）と 2 人プレイ ／ .3: 前払いクレジット（B-11） ／ .4: 特殊効果カード（B-10）
 
 export type MatchOp =
   /** 対局を作る（参加者と設定が決まった時点） */

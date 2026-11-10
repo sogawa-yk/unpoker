@@ -567,3 +567,12 @@
 .buy-list li.done {
   color: var(--text);
 }
+
+.sp-passing-note {
+  position: absolute;
+  top: 70px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 18px;
+  z-index: 5;
+}

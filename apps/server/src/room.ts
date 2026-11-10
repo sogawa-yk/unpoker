@@ -270,7 +270,9 @@ export class Room {
     this.data.rec = { matchId: `${this.id}-${this.data.matchNo}`, seed: newSeed(), eventNo: 0, startedAt: now, dealtGames: [], finishedGames: [] };
     this.data.match = null;
     // 前の対局から持ち越した特殊効果カード（このルームに残っている人のぶんだけ）
-    const held = Object.fromEntries(this.data.players.map((p) => [p.id, this.data.prevHeld?.[p.id] ?? null]));
+    // 開発用: DEV_GRANT_SPECIAL=<種類> なら、全員にそのカードを持たせて始める（本番では使わない）
+    const grant = process.env.NODE_ENV !== 'production' ? (process.env.DEV_GRANT_SPECIAL as SpecialKind | undefined) : undefined;
+    const held = Object.fromEntries(this.data.players.map((p) => [p.id, grant ?? this.data.prevHeld?.[p.id] ?? null]));
     this.exec({ op: 'create', config: this.data.config, players: this.data.players.map((p) => ({ id: p.id, name: p.name })), held }, 'table');
     // 特殊効果カードを配る（前の対局の成績から。最初の対局では配らない）
     if (this.data.config.specialCards && this.data.prevStats) this.exec({ op: 'specials', stats: this.data.prevStats.stats }, 'table');

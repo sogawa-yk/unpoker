@@ -9,6 +9,7 @@ import { Chips, ConnBadge, Gauge, HoldButton, PaidButton, StackChips, signed, To
 import { carryNext, challengeHands, potNow, provisionalRank, shownBoard, walletOf, type ChallengeRole } from '../game.ts';
 import { useSwapAnimation } from '../components/TableBits.tsx';
 import { outlookStage, PhoneOutlook } from '../components/Outlook.tsx';
+import { PassPicker, SpecialOffer, SpecialPanel, usableNow } from '../components/Special.tsx';
 import { savedToken, useRoom, type Room, type RoomView } from '../net.ts';
 import { FinalList, HostControls, HostLobby, NextGame, SwapBoard, TableStrip, TablelessCtx, tablelessOf, useTableless } from './PlayTable.tsx';
 import { sfx } from '../sound.ts';
@@ -123,18 +124,19 @@ function PhoneFinished({ room, s }: { room: Room; s: RoomView }) {
 function PhoneBuying({ room, s }: { room: Room; s: RoomView }) {
   const myId = s.you.role === 'player' ? s.you.playerId : '';
   const me = s.players.find((p) => p.id === myId);
-  const b = s.buying!;
+  const b = s.buying ?? { done: [], unit: s.config.bet };
   const [units, setUnits] = useState(0);
   const unit = b.unit;
   const max = me ? Math.max(0, Math.min(10, Math.floor(me.chips / 2 / unit))) : 0;
   const peek = Math.ceil(unit / 4);
   const advice = [Math.ceil(unit / 10), Math.ceil(unit / 4)];
-  const done = b.done.includes(myId);
+  const done = !s.buying || b.done.includes(myId);
   const waiting = s.players.filter((p) => !b.done.includes(p.id)).map((p) => p.name);
   if (done)
     return (
       <Centered>
-        <p className="ply-big">クレジット {(me?.credit ?? 0).toLocaleString()}</p>
+        <SpecialOffer room={room} s={s} />
+        {s.buying && <p className="ply-big">クレジット {(me?.credit ?? 0).toLocaleString()}</p>}
         <p className="muted">{waiting.length ? `${waiting.join('・')} が選んでいます` : 'まもなく始まります'}</p>
         <MyGaugeLite room={room} />
       </Centered>
@@ -142,6 +144,7 @@ function PhoneBuying({ room, s }: { room: Room; s: RoomView }) {
   return (
     <div className="pg buying">
       <MyGaugeLite room={room} />
+      <SpecialOffer room={room} s={s} />
       <h2 className="decision-title">前払いクレジットを買う</h2>
       <p className="decision-body">
         追加でめくる（1 枚 {peek}）と AI 相談（{advice[0]}〜{advice[1]}）の料金は、この対局ではクレジットから払います。買えるのは今だけです。
@@ -190,7 +193,7 @@ function PhoneGame({ room, s }: { room: Room; s: RoomView }) {
   const myId = s.you.role === 'player' ? s.you.playerId : '';
   // 二重送信を防ぐ: 同じ状態（サーバー時刻）の間は 1 回だけ送る
   const sentAt = useRef({ key: -1, at: 0 });
-  if (s.buying) return <PhoneBuying room={room} s={s} />;
+  if (s.buying || s.special?.offer) return <PhoneBuying room={room} s={s} />;
   if (s.betting) return <PhoneBetting room={room} s={s} />;
   if (!g || g.you === null) {
     const me = s.players.find((p) => p.id === myId);
@@ -253,6 +256,8 @@ function PhoneGameBody({
         <span className="pg-bet muted">ベット {g.bet}</span>
       </header>
       <PotRow g={g} />
+      <SpecialPanel g={g} me={me} act={act} gameNo={s.gameNo} />
+      <PassPicker g={g} me={me} act={act} name={name} />
       <MyGauge room={room} g={g} />
       <HostControls room={room} s={s} g={g} />
       <main className="pg-main">
@@ -407,7 +412,7 @@ function Placement({ g, me, act, name }: { g: GameView; me: SeatView; act: (a: G
         </p>
       )}
       {boardKnown.length > 0 && <MiniBoard cards={boardKnown} hidden={g.boardOwners.filter((o) => o === -1).length} label="場札" />}
-      <div className="hand7">
+      <div className={`hand7${me.cards.length !== 7 ? ' many' : ''}`}>
         {handIdx(me).map((k) => {
           const known = me.known.includes(k);
           const card = me.cards[k] ?? null;
@@ -433,7 +438,7 @@ function Placement({ g, me, act, name }: { g: GameView; me: SeatView; act: (a: G
             <Card
               card={card}
               faceUp={known && card !== null}
-              width={76}
+              width={me.cards.length > 7 ? 64 : 76}
               selected={isSel || isBuy}
               dim={!peeking && !known && !canBuy}
               onClick={onClick}
@@ -930,9 +935,23 @@ function useBot(room: Room, on: boolean, mash = false, consult = false) {
       const t = setTimeout(() => room.send({ t: 'bet', amount }), 1200);
       return () => clearTimeout(t);
     }
+    if (on && st?.special?.offer) {
+      const t = setTimeout(() => room.send({ t: 'specialPick', take: Math.random() < 0.5 }), 800);
+      return () => clearTimeout(t);
+    }
     if (!on || !g || g.you === null) return;
     const me = g.seats[g.you]!;
     let a: GameActionMsg | null = null;
+    // 開発用: 特殊効果カードは、使える時機が来たら半分の確率で使う。札を渡すときはランダムに選ぶ
+    const pass = g.special?.passing;
+    const kind = g.special?.mine;
+    if (pass && pass.myPick === null) {
+      const left = handIdx(me).filter((k) => k !== me.boardIndex);
+      a = { type: 'pass', index: left[Math.floor(Math.random() * left.length)]! };
+    } else if (kind && usableNow(g, me, kind) && Math.random() < 0.5) {
+      const idx = handIdx(me).filter((k) => k !== me.boardIndex);
+      a = { type: 'special', kind, index: idx[Math.floor(Math.random() * idx.length)]!, suit: Math.floor(Math.random() * 4) };
+    } else
     if (g.phase === 'placement') {
       if (me.peekedCount < 3) a = { type: 'peek', index: handIdx(me).find((k) => !me.known.includes(k))! };
       else if (!me.placed) {

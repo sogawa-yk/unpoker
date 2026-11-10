@@ -6,6 +6,7 @@ import { Card } from '../components/Card.tsx';
 import { Chips, ConnBadge, Gauge, signed, Toast } from '../components/bits.tsx';
 import { carryNext, potNow, provisionalRank, revealOdds, type HandOdds } from '../game.ts';
 import { OutlookGroups, outlookStage, SlotOdds } from '../components/Outlook.tsx';
+import { SpecialDealShow, SpecialUsedBanner } from '../components/Special.tsx';
 import { useRoom, type Room, type RoomView } from '../net.ts';
 import { RuleSettings, useJoinQr } from '../components/RoomSettings.tsx';
 import { Board, PauseButton, SoundButton, stampDelay, useChallengeBanner, useSwapAnimation, useTableSounds } from '../components/TableBits.tsx';
@@ -198,6 +199,13 @@ function TableGame({ room, s, g }: { room: Room; s: RoomView; g: GameView }) {
       <NutOverlay g={g} />
       <ChallengeBanner g={g} s={s} names={names} />
       <ChallengeIntro g={g} names={names} show={g.phase === 'swap' && swapDone.intro} />
+      <SpecialUsedBanner g={g} names={names} />
+      {s.gameNo === 1 && <SpecialDealShow s={s} overlay />}
+      {g.special?.passing && (
+        <div className="sp-passing-note banner">
+          {g.special.passing.dir === 1 ? '右' : '左'}隣へ札を 1 枚渡します（{g.special.passing.picked.filter(Boolean).length} / {g.seats.length} 人が選択）
+        </div>
+      )}
       <BetAnnounce s={s} g={g} names={names} />
     </div>
   );
@@ -218,6 +226,7 @@ function TableBuying({ room, s }: { room: Room; s: RoomView }) {
       <div className="betting">
         <p className="betting-title">前払いクレジットを買っています</p>
         <p className="muted">追加でめくる・AI 相談の料金は、この対局ではクレジットから払います</p>
+        <SpecialDealShow s={s} />
         <ul className="buy-list">
           {s.players.map((p) => (
             <li key={p.id} className={b.done.includes(p.id) ? 'done' : ''}>
@@ -459,6 +468,9 @@ function SeatPanel({ g, seat, sv, name, side, swapDone, odds }: { g: GameView; s
     <div className={`seat side-${side}${spotlight ? ' spot' : ''}${out ? ' out' : ''}${winner ? ' winner' : ''}`}>
       <div className="seat-head">
         <span className="seat-name">{name}</span>
+        {g.special?.holding[seat] && (
+          <span className="sp-badge" title="特殊効果カードを持っている（種類は伏せる）" aria-label="特殊効果カードあり" />
+        )}
         {g.dealer === seat && <span className="dealer" aria-label="親">親</span>}
         <Chips n={res ? res.stacks[seat]! : sv.stack} />
         {tags.map((t) => (
@@ -472,7 +484,7 @@ function SeatPanel({ g, seat, sv, name, side, swapDone, odds }: { g: GameView; s
           sv.sets.map((pair, si) => (
             <div key={si} className={`pair${bestSetIdx === si && score !== undefined ? ' best' : ''}`}>
               {pair.map((k) => (
-                <Card key={k} card={sv.cards[k] ?? null} faceUp={sv.cards[k] !== null} width={SEAT_CARD} win={!!winner && bestSetIdx === si} />
+                <Card key={k} card={sv.cards[k] ?? null} faceUp={sv.cards[k] !== null} width={sv.cards.length > 9 ? SEAT_CARD - 16 : sv.cards.length > 7 ? SEAT_CARD - 8 : SEAT_CARD} win={!!winner && bestSetIdx === si} />
               ))}
             </div>
           ))
@@ -480,7 +492,7 @@ function SeatPanel({ g, seat, sv, name, side, swapDone, odds }: { g: GameView; s
           <div className="pair loose">
             {Array.from({ length: 7 }, (_, k) => (
               <motion.div key={k} animate={{ y: k < sv.peekedCount ? -6 : 0, opacity: sv.placed && k === 0 ? 0.25 : 1 }}>
-                <Card card={null} faceUp={false} width={SEAT_CARD - 10} />
+                <Card card={null} faceUp={false} width={sv.cards.length > 7 ? SEAT_CARD - 18 : SEAT_CARD - 10} />
               </motion.div>
             ))}
           </div>

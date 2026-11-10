@@ -99,6 +99,15 @@ export function RuleSettings({ room, s }: { room: Room; s: RoomView }) {
         onChange={(v) => set({ prepaid: v === 'on' })}
       />
       <Segmented
+        label="特殊カード"
+        value={c.specialCards ? 'on' : 'off'}
+        options={[
+          ['off', 'なし'],
+          ['on', 'あり'],
+        ]}
+        onChange={(v) => set({ specialCards: v === 'on' })}
+      />
+      <Segmented
         label="残り 2 人"
         value={c.headsUp ? 'on' : 'off'}
         options={[

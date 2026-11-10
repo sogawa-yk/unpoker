@@ -98,6 +98,7 @@ class Client {
 function bot(c: Client) {
   const s = c.state;
   if (s?.buying && !c.idle && !s.buying.done.includes(c.playerId)) return c.send({ t: 'buy', units: c.consult ? 2 : 0 });
+  if (s?.special?.offer && !c.idle) return c.send({ t: 'specialPick', take: true });
   const g = s?.game;
   if (!g || g.you === null || c.idle) return;
   const me = g.seats[g.you]!;
@@ -546,10 +547,12 @@ describe('サーバー', () => {
     const records = new MemoryRecordStore();
     const { url, app } = await start(undefined, undefined, {}, records);
     const { table, players, roomId } = await setupRoom(url, ['あ', 'い', 'う']);
-    table.send({ t: 'configure', config: { initialChips: 1000, bet: 100, maxGames: 1 } });
+    table.send({ t: 'configure', config: { initialChips: 1000, bet: 100, maxGames: 1, specialCards: true } });
     await table.until(() => table.state!.config.maxGames === 1);
     table.send({ t: 'start' });
     await playUntilResult(table, players, 1);
+    // 最初の対局では特殊効果カードを配らない
+    expect(table.state!.special!.deals).toEqual([]);
     table.send({ t: 'nextGame' });
     await table.until(() => table.state!.status === 'finished');
     const tokens = players.map((p) => p.token);
@@ -564,9 +567,26 @@ describe('サーバー', () => {
     expect(room.data.prevStats!.matchNo).toBe(1);
     expect(room.data.prevStats!.stats.map((x) => x.id).sort()).toEqual(s.players.map((p) => p.id).sort());
     expect(room.data.prevStats!.stats.every((x) => x.games === 1)).toBe(true);
-    // 同じトークンのまま、次の対局を遊べる
+    // 同じトークンのまま、次の対局を遊べる。前の対局の成績から特殊効果カードを配る（種類は本人だけに見える）
     table.send({ t: 'start' });
     await playUntilResult(table, players, 1);
+    const deals = table.state!.special!.deals;
+    expect(deals.length).toBeGreaterThanOrEqual(1);
+    for (const d of deals) expect(d.candidates).toContain(d.recipient);
+    expect(table.state!.special!.mine).toBeNull();
+    expect(JSON.stringify(table.states)).not.toContain('"condition"');
+    const holder = players.find((p) => p.state!.special!.mine !== null);
+    if (holder) {
+      // 持っていることは全員に見え、種類は本人の mine にだけ入る
+      expect(table.state!.special!.holders).toContain(holder.playerId);
+      for (const p of players.filter((x) => x !== holder)) {
+        const sp = p.state!.special!;
+        expect(sp.offer).toBeNull();
+        const seat = p.state!.game!.seats.findIndex((x) => x.id === holder.playerId);
+        expect(p.state!.game!.special!.holding[seat]).toBe(true);
+        expect(JSON.stringify(p.state!.game!.special)).not.toMatch(/"held"/);
+      }
+    }
     expect(players.map((p) => p.token)).toEqual(tokens);
     await room.flush();
     await app.close();
