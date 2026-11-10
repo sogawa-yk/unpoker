@@ -90,6 +90,15 @@ export function RuleSettings({ room, s }: { room: Room; s: RoomView }) {
         onChange={(v) => set({ maxGames: v })}
       />
       <Segmented
+        label="前払い"
+        value={c.prepaid === false ? 'off' : 'on'}
+        options={[
+          ['on', 'あり'],
+          ['off', 'なし'],
+        ]}
+        onChange={(v) => set({ prepaid: v === 'on' })}
+      />
+      <Segmented
         label="残り 2 人"
         value={c.headsUp ? 'on' : 'off'}
         options={[

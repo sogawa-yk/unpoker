@@ -9,3 +9,4 @@ export * from './advisor.ts';
 export * from './replay.ts';
 export * from './outlook.ts';
 export * from './stats.ts';
+export * from './special.ts';

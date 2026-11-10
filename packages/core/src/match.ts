@@ -1,6 +1,8 @@
 // 対局（ゲームの連続プレイ）。rules.md 付録 B-0・B-1
 import { clone, type Rng } from './cards.ts';
 import { categoryOf, evaluate } from './evaluator.ts';
+import { drawSpecialDeals, type SpecialDeal, type SpecialKind } from './special.ts';
+import type { PlayerStats } from './stats.ts';
 import { GameError, newGame, paidExtras, type GameState } from './game.ts';
 
 export type BetMode = 'fixed' | 'rotating';
@@ -21,7 +23,18 @@ export interface MatchConfig {
   timeLimit?: boolean;
   /** ヘッズアップ: 3 人以上で始めた対局が残り 2 人になっても続けるか（B-0・B-1）。古い設定には無い（続けない） */
   headsUp?: boolean;
+  /** 前払いクレジット（B-11）。追加めくりと AI 相談の料金を、対局の最初に買ったクレジットから払う。古い設定には無い（使わない） */
+  prepaid?: boolean;
+  /** 特殊効果カード（B-10）。古い設定には無い（使わない） */
+  specialCards?: boolean;
 }
+
+/** クレジットを買う単位（固定ベットならベット額、持ち回りなら最低ベット） */
+export const creditUnit = (c: MatchConfig) => (c.betMode === 'rotating' ? (c.minBet ?? c.bet) : c.bet);
+/** 1 人が買える上限（単位の数） */
+export const CREDIT_MAX_UNITS = 10;
+/** 買える単位の数の上限（持ち点の半分まで） */
+export const creditMaxUnits = (c: MatchConfig, chips: number) => Math.max(0, Math.min(CREDIT_MAX_UNITS, Math.floor(chips / 2 / creditUnit(c))));
 
 export const DEFAULT_CONFIG: MatchConfig = {
   initialChips: 1000,
@@ -33,6 +46,8 @@ export const DEFAULT_CONFIG: MatchConfig = {
   betStep: 50,
   timeLimit: true,
   headsUp: false,
+  prepaid: true,
+  specialCards: false,
 };
 
 export const BET_STEPS = [10, 50, 100] as const;
@@ -107,9 +122,21 @@ export interface MatchState {
   refund?: Record<string, number> | null;
   /** 持ち回り方式で、親がベット額を選んでいる間（配る前） */
   betting?: { dealerId: string } | null;
+  /** 前払いクレジットの残り（プレイヤー ID → 額。前払い制のときだけ） */
+  credits?: Record<string, number>;
+  /** 前払い制で、対局の最初にクレジットを買っている間（買い終えた人の ID） */
+  buying?: { done: string[] } | null;
+  /** 特殊効果カードの持ち札（プレイヤー ID → 種類。持てるのは 1 枚。B-10） */
+  specials?: Record<string, SpecialKind | null>;
+  /** 対局の始めに配ったカード（条件と種類は伏せて公開する） */
+  specialDeals?: SpecialDeal[];
+  /** 持っているカードと新しいカードのどちらを持つか、選んでもらっている間 */
+  specialOffers?: { playerId: string; current: SpecialKind; offered: SpecialKind }[];
+  /** 「今 2 組増やす」を使った人（次のゲームは 2 枚 × 2 組） */
+  shrinkNext?: string[];
 }
 
-export function createMatch(config: MatchConfig, players: { id: string; name: string }[]): MatchState {
+export function createMatch(config: MatchConfig, players: { id: string; name: string }[], held: Record<string, SpecialKind | null> = {}): MatchState {
   if (players.length < 2 || players.length > 4) throw new GameError('参加人数は 2〜4 人');
   validateConfig(config);
   return {
@@ -124,8 +151,74 @@ export function createMatch(config: MatchConfig, players: { id: string; name: st
     ranking: null,
     carry: { amount: 0, from: {} },
     refund: null,
+    ...(config.prepaid ? { credits: Object.fromEntries(players.map((p) => [p.id, 0])), buying: { done: [] } } : {}),
+    ...(config.specialCards ? { specials: Object.fromEntries(players.map((p) => [p.id, held[p.id] ?? null])), specialDeals: [], specialOffers: [], shrinkNext: [] } : {}),
   };
 }
+
+/** 対局の始めに特殊効果カードを配る（前の対局の成績から。B-10）。持っている人には、どちらを持つか選んでもらう */
+export function dealSpecials(m: MatchState, stats: PlayerStats[], rng: Rng): MatchState {
+  if (!m.specials) throw new GameError('特殊効果カードを使わない対局');
+  const next = clone(m);
+  const deals = drawSpecialDeals(stats, next.players.map((p) => p.id), rng);
+  next.specialDeals = deals;
+  for (const d of deals) {
+    const cur = next.specials![d.recipient];
+    if (cur) next.specialOffers!.push({ playerId: d.recipient, current: cur, offered: d.kind });
+    else next.specials![d.recipient] = d.kind;
+  }
+  return next;
+}
+
+/** 持っているカードと新しいカードのどちらを持つか（take なら新しいほう）。playerId が null なら時間切れ: 全員いまのカードのまま */
+export function chooseSpecial(m: MatchState, playerId: string | null, take: boolean): MatchState {
+  if (!m.specialOffers?.length) throw new GameError('選ぶ場面ではない');
+  const next = clone(m);
+  if (playerId === null) {
+    next.specialOffers = [];
+    return next;
+  }
+  const k = next.specialOffers!.findIndex((o) => o.playerId === playerId);
+  if (k < 0) throw new GameError('選ぶカードがない');
+  const o = next.specialOffers!.splice(k, 1)[0]!;
+  if (take) {
+    next.specials![playerId] = o.offered;
+    // 同じ人への次の提案は、新しく持ったカードとの比べになる
+    for (const x of next.specialOffers!) if (x.playerId === playerId) x.current = o.offered;
+  }
+  return next;
+}
+
+/** 最初のゲームを始める前に待つこと（クレジットを買う、カードを選ぶ）が残っているか */
+export const waitingBeforeStart = (m: MatchState) => !!m.buying || !!m.specialOffers?.length;
+
+/**
+ * 前払いクレジットを買う（対局の最初に 1 回だけ。B-11）。units は単位の数。
+ * playerId が null なら時間切れ: まだ買っていない人は 0 で締め切る。全員が買い終えたら buying が null になる
+ */
+export function buyCredit(m: MatchState, playerId: string | null, units: number | null): MatchState {
+  if (!m.buying || !m.credits) throw new GameError('クレジットを買う場面ではない');
+  const next = clone(m);
+  const b = next.buying!;
+  if (playerId === null) {
+    b.done = next.players.map((p) => p.id);
+  } else {
+    const p = next.players.find((x) => x.id === playerId) ?? fail('参加していない');
+    if (b.done.includes(playerId)) throw new GameError('もう買った');
+    const u = units ?? 0;
+    if (!Number.isInteger(u) || u < 0 || u > creditMaxUnits(next.config, p.chips)) throw new GameError('買える数を超えている');
+    const price = u * creditUnit(next.config);
+    p.chips -= price;
+    next.credits![playerId] = price;
+    b.done.push(playerId);
+  }
+  if (next.players.every((p) => b.done.includes(p.id))) next.buying = null;
+  return next;
+}
+
+const fail = (msg: string): never => {
+  throw new GameError(msg);
+};
 
 export function validateConfig(c: MatchConfig) {
   const ok =
@@ -163,6 +256,8 @@ export function startGame(m: MatchState, rng: Rng): MatchState {
   if (m.finished) throw new GameError('対局は終了している');
   if (m.game && m.game.phase !== 'result') throw new GameError('ゲームの途中');
   if (m.betting) throw new GameError('親がベット額を選んでいる');
+  if (m.buying) throw new GameError('クレジットを買っている');
+  if (m.specialOffers?.length) throw new GameError('特殊効果カードを選んでいる');
   const next = clone(m);
   const act = active(next);
   if (shouldEnd(next)) return endMatch(next);
@@ -221,13 +316,33 @@ function deal(next: MatchState, bet: number, rng: Rng): MatchState {
   const act = active(next);
   const dealer = next.players.find((p) => p.id === next.dealerId)!;
   const isFinal = next.config.maxGames !== null && next.gameNo === next.config.maxGames;
+  if (isFinal && next.credits) {
+    // 最終ゲームでは追加めくりと AI 相談ができない。使い残しのクレジットは全部、最終ゲームの持ち越しポットに入れる（B-11）
+    const carry = next.carry ?? { amount: 0, from: {} };
+    for (const [id, v] of Object.entries(next.credits)) {
+      if (v <= 0) continue;
+      carry.amount += v;
+      carry.from[id] = (carry.from[id] ?? 0) + v;
+      next.credits[id] = 0;
+    }
+    next.carry = carry;
+  }
   next.game = newGame(
     {
-      players: act.map((p) => ({ id: p.id, chips: p.chips })),
+      players: act.map((p) => ({
+        id: p.id,
+        chips: p.chips,
+        credit: next.credits?.[p.id] ?? 0,
+        held: next.specials?.[p.id] ?? null,
+        // 前のゲームで「今 2 組増やす」を使った人は、2 枚 × 2 組（場に出す 1 枚と合わせて 5 枚）
+        handSize: next.shrinkNext?.includes(p.id) ? 5 : undefined,
+      })),
+      specials: !!next.specials,
       bet,
       dealer: act.indexOf(dealer),
       carryIn: next.carry?.amount ?? 0,
       extraPeeks: !isFinal,
+      prepaid: !!next.credits,
     },
     rng,
   );
@@ -265,6 +380,22 @@ export function settleGame(m: MatchState): MatchState {
     if (paidExtras(s) > 0) from[next.seatIds[i]!] = paidExtras(s);
   });
   next.carry = { amount: r.carryOut, from };
+  if (next.specials && g.special) {
+    g.seats.forEach((_, i) => (next.specials![next.seatIds[i]!] = g.special!.held[i] ?? null));
+    next.shrinkNext = g.special.surged.map((i) => next.seatIds[i]!);
+  }
+  if (next.credits) {
+    g.seats.forEach((s, i) => {
+      const id = next.seatIds[i]!;
+      next.credits![id] = s.credit ?? 0;
+      // 脱落した人の使い残しは、次のゲームの持ち越しポットへ（B-11）
+      if (r.stacks[i] === 0 && next.credits![id]! > 0) {
+        next.carry!.amount += next.credits![id]!;
+        next.carry!.from[id] = (next.carry!.from[id] ?? 0) + next.credits![id]!;
+        next.credits![id] = 0;
+      }
+    });
+  }
   next.gameNo++;
   next.game = null;
   if (shouldEnd(next)) return endMatch(next);
@@ -296,6 +427,15 @@ function endMatch(m: MatchState): MatchState {
   m.finished = true;
   m.game = null;
   const left = active(m);
+  if (m.credits) {
+    // 途中で終わった: 残り 1 人なら、全員の使い残しを残った人へ。そうでなければ本人へ返す（B-11）
+    for (const [id, v] of Object.entries(m.credits)) {
+      if (v <= 0) continue;
+      const to = left.length === 1 ? left[0]! : m.players.find((x) => x.id === id);
+      if (to) to.chips += v;
+      m.credits[id] = 0;
+    }
+  }
   if (left.length === 1 && m.carry && m.carry.amount > 0) {
     // 残り 1 人で終わった: 持ち越しポットは残った人が全部受け取る（B-3。2026-11-10 決定）
     left[0]!.chips += m.carry.amount;

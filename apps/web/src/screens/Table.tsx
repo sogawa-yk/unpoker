@@ -31,9 +31,11 @@ export function TableScreen({ roomId, navigate }: { roomId: string | null; navig
       ) : s.status === 'lobby' ? (
         <Lobby room={room} s={s} />
       ) : s.status === 'finished' ? (
-        <Finished s={s} navigate={navigate} />
+        <Finished room={room} s={s} navigate={navigate} />
       ) : s.game ? (
         <TableGame room={room} s={s} g={s.game} />
+      ) : s.buying ? (
+        <TableBuying room={room} s={s} />
       ) : s.betting ? (
         <TableBetting room={room} s={s} />
       ) : null}
@@ -89,7 +91,7 @@ function Lobby({ room, s }: { room: Room; s: RoomView }) {
         </p>
       </section>
       <section className="lobby-side">
-        <h2 className="lobby-h">卓につく人</h2>
+        <h2 className="lobby-h">卓につく人{s.matchNo > 1 && <span className="muted small">（{s.matchNo} 対局目）</span>}</h2>
         <ul className="lobby-players">
           {[0, 1, 2, 3].map((i) => {
             const p = s.players[i];
@@ -204,6 +206,34 @@ function TableGame({ room, s, g }: { room: Room; s: RoomView; g: GameView }) {
 const rotatingBet = (s: RoomView) => s.config.betMode === 'rotating';
 
 /** 持ち回り方式: 親がベット額を選んでいる間のテーブル */
+/** 対局の最初: 各自がスマホで前払いクレジットを買っている（B-11） */
+function TableBuying({ room, s }: { room: Room; s: RoomView }) {
+  const b = s.buying!;
+  return (
+    <div className="game">
+      <div className="game-ctrl">
+        {s.config.timeLimit !== false && <PauseButton room={room} s={s} />}
+        <SoundButton />
+      </div>
+      <div className="betting">
+        <p className="betting-title">前払いクレジットを買っています</p>
+        <p className="muted">追加でめくる・AI 相談の料金は、この対局ではクレジットから払います</p>
+        <ul className="buy-list">
+          {s.players.map((p) => (
+            <li key={p.id} className={b.done.includes(p.id) ? 'done' : ''}>
+              <span>{p.name}</span>
+              <span>{b.done.includes(p.id) ? `${(p.credit ?? 0).toLocaleString()}` : '考え中…'}</span>
+            </li>
+          ))}
+        </ul>
+        <div className="center-gauge">
+          <Gauge room={room} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TableBetting({ room, s }: { room: Room; s: RoomView }) {
   const b = s.betting!;
   const name = s.players.find((p) => p.id === b.dealerId)?.name ?? '？';
@@ -507,7 +537,7 @@ function NutOverlay({ g }: { g: GameView }) {
 
 // ---------------------------------------------------------------- 終了
 
-function Finished({ s, navigate }: { s: RoomView; navigate: (p: string) => void }) {
+function Finished({ room, s, navigate }: { room: Room; s: RoomView; navigate: (p: string) => void }) {
   const ranked = useMemo(() => (s.ranking ?? []).map((id) => s.players.find((p) => p.id === id)!).filter(Boolean), [s]);
   return (
     <div className="finished">
@@ -533,9 +563,15 @@ function Finished({ s, navigate }: { s: RoomView; navigate: (p: string) => void 
           ）
         </p>
       )}
-      <button className="btn" onClick={() => navigate('/table')}>
-        新しい対局を始める
-      </button>
+      <div className="finished-actions">
+        <button className="btn btn-shu" onClick={() => room.send({ t: 'rematch' })}>
+          同じメンバーで次の対局
+        </button>
+        <button className="btn btn-ghost" onClick={() => navigate('/table')}>
+          新しいテーブルを作る
+        </button>
+      </div>
+      <p className="muted small">同じメンバーなら、持ち点を戻して続けます。前の対局の成績は次の対局に引き継がれます</p>
     </div>
   );
 }

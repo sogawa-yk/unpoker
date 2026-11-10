@@ -1,6 +1,7 @@
 // 1 ルームの状態と進行。ゲームの規則は @unpoker/core に任せ、ここでは参加者・接続・タイマー・保存を扱う
 import {
   betOptions,
+  creditUnit,
   DEFAULT_CONFIG,
   GameError,
   matchStats,
@@ -9,12 +10,14 @@ import {
   RULES_VERSION,
   validateConfig,
   viewFor,
+  waitingBeforeStart,
   type GameAction,
   type MatchConfig,
   type MatchOp,
   type MatchState,
   type PlayerStats,
   type Rng,
+  type SpecialKind,
 } from '@unpoker/core';
 import type { GameActionMsg, RoomStatus, RoomView, ServerMsg } from './protocol.ts';
 import { newPlayerId, newSeed, newToken, streamRng } from './ids.ts';
@@ -48,6 +51,8 @@ export interface Timing {
   minSpin: number;
   /** 便乗の受付が始まったときの「挑戦」の発表（画面の CHALLENGE_BANNER_MS）。顔ぶれの発表はこの後に始まる */
   challengeBanner: number;
+  /** 対局の最初に、前払いクレジットを買う持ち時間 */
+  buy: number;
 }
 
 export const DEFAULT_TIMING: Timing = {
@@ -65,6 +70,7 @@ export const DEFAULT_TIMING: Timing = {
   swapIntro: 3_000,
   minSpin: 1_500,
   challengeBanner: 2_600,
+  buy: 60_000,
 };
 
 export interface RoomPlayer {
@@ -121,6 +127,8 @@ export interface RoomData {
   rec?: RoomRecord | null;
   /** 前の対局の成績（同じメンバーで次の対局を始めたとき。特殊効果カードを配る条件に使う） */
   prevStats?: { matchNo: number; stats: PlayerStats[] } | null;
+  /** 前の対局の終わりに持っていた特殊効果カード（次の対局へ持ち越す） */
+  prevHeld?: Record<string, SpecialKind | null> | null;
 }
 
 export interface Conn {
@@ -261,8 +269,13 @@ export class Room {
     this.data.matchNo = (this.data.matchNo ?? 0) + 1;
     this.data.rec = { matchId: `${this.id}-${this.data.matchNo}`, seed: newSeed(), eventNo: 0, startedAt: now, dealtGames: [], finishedGames: [] };
     this.data.match = null;
-    this.exec({ op: 'create', config: this.data.config, players: this.data.players.map((p) => ({ id: p.id, name: p.name })) }, 'table');
-    this.exec({ op: 'start' }, 'table');
+    // 前の対局から持ち越した特殊効果カード（このルームに残っている人のぶんだけ）
+    const held = Object.fromEntries(this.data.players.map((p) => [p.id, this.data.prevHeld?.[p.id] ?? null]));
+    this.exec({ op: 'create', config: this.data.config, players: this.data.players.map((p) => ({ id: p.id, name: p.name })), held }, 'table');
+    // 特殊効果カードを配る（前の対局の成績から。最初の対局では配らない）
+    if (this.data.config.specialCards && this.data.prevStats) this.exec({ op: 'specials', stats: this.data.prevStats.stats }, 'table');
+    // クレジットを買う・カードを選ぶのが終わってから最初のゲームを始める（buy / specialPick の操作で始まる）
+    if (!waitingBeforeStart(this.data.match!)) this.exec({ op: 'start' }, 'table');
     this.data.status = this.data.match!.finished ? 'finished' : 'playing';
     this.commit();
   }
@@ -282,6 +295,7 @@ export class Room {
   rematch() {
     if (this.data.status !== 'finished' || !this.data.match) throw new RoomError('対局が終わってから次の対局へ進む');
     this.data.prevStats = { matchNo: this.data.matchNo ?? 1, stats: matchStats(this.data.match) };
+    this.data.prevHeld = this.data.match.specials ?? this.data.prevHeld ?? null;
     this.data.status = 'lobby';
     this.data.match = null;
     this.data.rec = null;
@@ -317,6 +331,20 @@ export class Room {
   }
 
   // ---- プレイヤーの操作 ----
+
+  /** 前払いクレジットを買う（対局の最初。B-11） */
+  buy(playerId: string, units: number) {
+    if (this.data.status !== 'playing' || !this.data.match?.buying) throw new RoomError('クレジットを買う場面ではない');
+    this.exec({ op: 'buy', playerId, units }, playerId);
+    this.commit();
+  }
+
+  /** 持っている特殊効果カードと新しいカードのどちらを持つか */
+  pickSpecial(playerId: string, take: boolean) {
+    if (this.data.status !== 'playing' || !this.data.match?.specialOffers?.some((o) => o.playerId === playerId)) throw new RoomError('選ぶカードがない');
+    this.exec({ op: 'specialPick', playerId, take }, playerId);
+    this.commit();
+  }
 
   /** 持ち回り方式で、親がベット額を決めて配る */
   bet(playerId: string, amount: number) {
@@ -517,6 +545,10 @@ export class Room {
   /** 局面に応じた締め切りを決める。同じ局面のままなら締め切りは変えない */
   private schedule() {
     const g = this.data.match?.game;
+    if (this.data.status === 'playing' && this.data.match && waitingBeforeStart(this.data.match)) {
+      this.setDeadline('buy', this.deps.timing.buy, true);
+      return;
+    }
     if (this.data.status === 'playing' && this.data.match?.betting) {
       this.setDeadline(`${this.data.match.gameNo}:bet`, this.deps.timing.bet, true);
       return;
@@ -599,6 +631,19 @@ export class Room {
 
   private fire() {
     this.timer = null;
+    if (this.data.status === 'playing' && this.data.match && waitingBeforeStart(this.data.match)) {
+      // 買わなかった人は 0、カードを選ばなかった人はいまのカードのままで締め切る
+      this.data.phaseKey = null;
+      this.data.deadline = null;
+      try {
+        if (this.data.match.specialOffers?.length) this.exec({ op: 'specialPick', playerId: null, take: false }, 'timer');
+        if (this.data.match.buying) this.exec({ op: 'buy', playerId: null, units: null }, 'timer');
+      } catch (e) {
+        this.deps.log?.('timer buy failed', { room: this.id, error: String(e) });
+      }
+      this.commit();
+      return;
+    }
     if (this.data.status === 'playing' && this.data.match?.betting) {
       // 親が選ばなければ最低ベット（B-0）
       this.data.phaseKey = null;
@@ -660,7 +705,8 @@ export class Room {
       players: d.players.map((p) => {
         const s = seatOf(p.id);
         const chipsNow = m?.players.find((x) => x.id === p.id)?.chips ?? d.config.initialChips;
-        return { id: p.id, name: p.name, connected: connected.has(p.id), chips: chipsNow, seat: s >= 0 ? s : null };
+        const credit = m?.game?.seats[s]?.credit ?? m?.credits?.[p.id] ?? null;
+        return { id: p.id, name: p.name, connected: connected.has(p.id), chips: chipsNow, seat: s >= 0 ? s : null, credit };
       }),
       tableConnected: [...this.conns].some((c) => c.role === 'table'),
       hostId: d.hostId ?? null,
@@ -676,6 +722,16 @@ export class Room {
       deadlineIsTimeout: d.deadlineIsTimeout,
       refund: m?.refund ?? null,
       betting: m?.betting ? { dealerId: m.betting.dealerId, options: betOptions(m) } : null,
+      buying: m?.buying ? { done: [...m.buying.done], unit: creditUnit(m.config) } : null,
+      special: m?.specials
+        ? {
+            mine: conn.playerId ? (m.game ? (m.game.special?.held[m.seatIds.indexOf(conn.playerId)] ?? null) : (m.specials[conn.playerId] ?? null)) : null,
+            holders: m.game?.special ? m.seatIds.filter((_, i) => m.game!.special!.held[i]) : Object.keys(m.specials).filter((id) => m.specials![id]),
+            deals: (m.specialDeals ?? []).map((d) => ({ recipient: d.recipient, candidates: [...d.candidates] })),
+            offer: conn.playerId ? (m.specialOffers?.find((o) => o.playerId === conn.playerId) ?? null) : null,
+            shrinkNext: [...(m.shrinkNext ?? [])],
+          }
+        : null,
       paused: !!d.paused,
       pausedRemain: d.pausedRemain ?? null,
       serverTime: this.deps.now(),

@@ -39,6 +39,15 @@ async function openTable(browser: Browser) {
 
 const bot = (browser: Browser, roomId: string, name: string) => open(browser, PHONE, `/play/${roomId}?name=${encodeURIComponent(name)}&bot=1`);
 
+/** 長押しのボタンを押し続ける */
+async function hold(page: Page, btn: ReturnType<Page['getByRole']>, ms = 900) {
+  const box = (await btn.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.waitForTimeout(ms);
+  await page.mouse.up();
+}
+
 /** ステッパーの値が目標になるまで押す */
 async function setGames(page: Page, n: number) {
   const group = page.getByRole('group', { name: 'ゲーム数' }).or(page.locator('.stepper', { hasText: 'ゲーム数' }));
@@ -82,6 +91,10 @@ test('ボット 4 人で 2 ゲーム遊び、最終結果まで進む（固定�
   await expect(table.page.locator('.final-list li')).toHaveCount(4);
   await expect(table.page.getByText('2 ゲーム遊びました')).toBeVisible();
   for (const ph of phones) await expect(ph.page.locator('.ply')).not.toContainText('卓につく');
+  // 同じメンバーで次の対局: 待機中に戻り、全員がそのまま卓についている
+  await table.page.getByRole('button', { name: '同じメンバーで次の対局' }).click();
+  await expect(table.page.getByText('（2 対局目）')).toBeVisible();
+  await expect(table.page.getByRole('button', { name: '4 人で対局を始める' })).toBeEnabled();
   expect([table, ...phones].flatMap((d) => d.errors)).toEqual([]);
 });
 
@@ -143,7 +156,15 @@ test('人がコードを入れて参加し、途中で読み込み直しても�
   await expect(table.page.getByRole('button', { name: '2 人で対局を始める' })).toBeEnabled();
   others.push(await bot(browser, table.roomId, 'そうた'));
   await table.page.getByRole('button', { name: '3 人で対局を始める' }).click();
+
+  // 前払いクレジット: 人は画面で 1 単位（100）を買う。テーブルには買った額が出る
+  await expect(table.page.getByText('前払いクレジットを買っています')).toBeVisible();
+  await expect(human.page.getByRole('heading', { name: '前払いクレジットを買う' })).toBeVisible();
+  await human.page.getByRole('button', { name: '1 単位増やす' }).click();
+  await hold(human.page, human.page.getByRole('button', { name: /長押しで 100 買う/ }));
+  await expect(table.page.locator('.buy-list li', { hasText: 'ゆき' })).toContainText('100');
   await expect(table.page.locator('[data-phase="placement"]')).toBeVisible();
+  await expect(human.page.locator('.paid-pill', { hasText: 'クレジット' })).toContainText('100');
 
   // 持ち時間を止めて、また動かせる
   await table.page.getByRole('button', { name: /持ち時間を止める/ }).click();

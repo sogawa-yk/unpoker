@@ -4,6 +4,7 @@ import type { GameActionMsg } from '../../../server/src/protocol.ts';
 import { Card, cardName } from './Card.tsx';
 import { PaidButton } from './bits.tsx';
 import { tenTimes } from './Outlook.tsx';
+import { walletOf } from '../game.ts';
 
 /** 今この席が相談できる判断（core の adviceTopic と同じ判定） */
 export function topicNow(g: GameView, me: SeatView): AdviceTopic | null {
@@ -75,17 +76,19 @@ export function AdvicePanel({
   }
   const challenge = topic === 'declare' || topic === 'join';
   const fee = challenge ? g.advicePrice.challenge : g.advicePrice.placement;
-  const enough = challenge ? me.stack > fee : me.stack >= fee;
+  const w = walletOf(me);
+  // 前払い制ならクレジットから払う（チャレンジの判断は参加費を出せる持ち点も要る）。そうでなければ持ち点から払う
+  const enough = me.credit !== null ? w.amount >= fee && (!challenge || me.stack > 0) : challenge ? me.stack > fee : me.stack >= fee;
   const what = topic === 'place' ? 'どの札を場に出すか' : topic === 'arrange' ? 'どう組むか' : topic === 'declare' ? 'チャレンジするか' : '乗るか';
   const note = !g.extraPeeks
     ? '最終ゲームなので、相談できません'
     : !enough
-      ? '持ち点が足りないので、相談できません'
+      ? `${w.label}が足りないので、相談できません`
       : compact
         ? undefined
         : `${what}を数字で答えます。相談したことは全員に表示されます`;
   return (
-    <PaidButton cost={fee} stack={me.stack} onDone={() => act({ type: 'consult' })} disabled={!g.extraPeeks || !enough} note={note}>
+    <PaidButton cost={fee} stack={w.amount} walletLabel={w.label} onDone={() => act({ type: 'consult' })} disabled={!g.extraPeeks || !enough} note={note}>
       長押しで AI に相談
     </PaidButton>
   );

@@ -173,6 +173,14 @@ export class Rooms {
         const r = this.requireHost(conn);
         return msg.paused ? r.pause() : r.unpause();
       }
+      case 'specialPick': {
+        if (conn.role !== 'player' || !conn.playerId) throw new RoomError('プレイヤーだけができる操作');
+        return this.room(conn).pickSpecial(conn.playerId, msg.take);
+      }
+      case 'buy': {
+        if (conn.role !== 'player' || !conn.playerId) throw new RoomError('プレイヤーだけができる操作');
+        return this.room(conn).buy(conn.playerId, msg.units);
+      }
       case 'bet': {
         if (conn.role !== 'player' || !conn.playerId) throw new RoomError('プレイヤーだけができる操作');
         return this.room(conn).bet(conn.playerId, msg.amount);

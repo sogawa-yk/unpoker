@@ -12,6 +12,10 @@ import {
   betOptions,
   chooseBet,
   validateConfig,
+  matchStats,
+  buyCredit,
+  creditMaxUnits,
+  wallet,
   settleGame,
   startGame,
   viewFor,
@@ -128,13 +132,21 @@ describe('ゲーム進行', () => {
 });
 
 /** ランダムに合法手を選んで対局を最後まで進める */
-function playMatch(seed: number, n: number, headsUp = false) {
+function playMatch(seed: number, n: number, headsUp = false, prepaid = false) {
   const rng = seededRng(seed);
   let m = createMatch(
-    { initialChips: 500, bet: 10 * (1 + Math.floor(rng() * 30)), maxGames: 8, headsUp },
+    { initialChips: 500, bet: 10 * (1 + Math.floor(rng() * 30)), maxGames: 8, headsUp, prepaid },
     Array.from({ length: n }, (_, i) => ({ id: `p${i}`, name: `P${i}` })),
   );
   const total = m.players.reduce((a, p) => a + p.chips, 0);
+  const credits = () => Object.values(m.credits ?? {}).reduce((a, b) => a + b, 0);
+  if (prepaid) {
+    // 前払いクレジットを買う。1 人は時間切れで 0
+    for (const p of m.players.slice(1)) m = buyCredit(m, p.id, Math.floor(rng() * (creditMaxUnits(m.config, p.chips) + 1)));
+    m = buyCredit(m, null, null);
+    expect(m.buying).toBeNull();
+    expect(m.players.reduce((a, p) => a + p.chips, 0) + credits()).toBe(total);
+  }
   let games = 0;
   while (!m.finished) {
     m = startGame(m, rng);
@@ -158,11 +170,14 @@ function playMatch(seed: number, n: number, headsUp = false) {
     }
     checkViews(g);
     const r = g.result!;
-    expect(r.delta.reduce((a, b) => a + b, 0)).toBe(g.carryIn - r.carryOut);
+    // 前払い制では料金をクレジットから払うので、持ち点の増減には入らない
+    const fromCredit = g.prepaid ? r.carryOut : 0;
+    expect(r.delta.reduce((a, b) => a + b, 0)).toBe(g.carryIn - r.carryOut + fromCredit);
+    if (g.prepaid) g.seats.forEach((p) => expect(p.credit!).toBeGreaterThanOrEqual(0));
     expect(r.stacks.every((x) => x >= 0)).toBe(true);
     m = settleGame({ ...m, game: g });
-    // 持ち点と持ち越しポットの合計は変わらない
-    expect(m.players.reduce((a, p) => a + p.chips, 0) + (m.carry?.amount ?? 0)).toBe(total);
+    // 持ち点とクレジットと持ち越しポットの合計は変わらない
+    expect(m.players.reduce((a, p) => a + p.chips, 0) + credits() + (m.carry?.amount ?? 0)).toBe(total);
     games++;
   }
   expect(m.ranking).toHaveLength(n);
@@ -172,6 +187,7 @@ function playMatch(seed: number, n: number, headsUp = false) {
   if (m.gameNo <= 8) expect(left === 1 || (left === 2 && n >= 3 && !headsUp), JSON.stringify({ seed, n, headsUp, left, gameNo: m.gameNo, chips: m.players.map((p) => p.chips) })).toBe(true);
   // 終わったら持ち越しポットは払い戻されている（残り 1 人なら、その人が受け取っている）
   expect(m.carry?.amount ?? 0).toBe(0);
+  expect(credits()).toBe(0);
   expect(m.players.reduce((a, p) => a + p.chips, 0)).toBe(total);
   return games;
 }
@@ -184,7 +200,7 @@ function randomAction(g: GameState, seat: number, rng: Rng): GameAction {
     case 'placement': {
       if (p.peeked.length < 3) return { type: 'peek', seat, index: pick([...Array(HAND_SIZE).keys()].filter((k) => !p.peeked.includes(k))) };
       const rest = [...Array(HAND_SIZE).keys()].filter((k) => !p.peeked.includes(k));
-      if (p.boardIndex === null && g.extraPeeks && p.stack >= g.peekPrice && rest.length > 0 && rng() < 0.3)
+      if (p.boardIndex === null && g.extraPeeks && wallet(g, p) >= g.peekPrice && rest.length > 0 && rng() < 0.3)
         return { type: 'peek', seat, index: pick(rest) };
       if (p.boardIndex === null) return { type: 'place', seat, index: pick(p.peeked) };
       const idx = [...Array(HAND_SIZE).keys()].filter((k) => k !== p.boardIndex);
@@ -248,6 +264,9 @@ describe('ランダム対局（不変条件）', () => {
       games += playMatch(3000 + seed, 3, true);
       games += playMatch(1000 + seed, 4);
       games += playMatch(4000 + seed, 4, true);
+      games += playMatch(5000 + seed, 3, false, true);
+      games += playMatch(6000 + seed, 4, true, true);
+      games += playMatch(7000 + seed, 2, false, true);
     }
     expect(games).toBeGreaterThan(300);
   });
@@ -522,5 +541,94 @@ describe('ヘッズアップ（B-1）', () => {
     }
     expect(m.finished).toBe(true);
     expect(() => validateConfig({ initialChips: 1000, bet: 100, maxGames: null })).toThrow(GameError);
+  });
+});
+
+describe('対局の成績（特殊効果カードの配布条件）', () => {
+  it('ゲームの詳細から、勝ち数・脱落・使った額などを数える', () => {
+    const rng = seededRng(21);
+    let m = createMatch({ initialChips: 500, bet: 100, maxGames: 6 }, [0, 1, 2].map((i) => ({ id: `p${i}`, name: `P${i}` })));
+    while (!m.finished) {
+      m = startGame(m, rng);
+      if (m.finished) break;
+      let g = m.game!;
+      while (g.phase !== 'result') {
+        const pend = pendingSeats(g);
+        if (pend.length === 0) g = apply(g, { type: 'advance' }, rng);
+        else g = apply(g, randomAction(g, pend[0]!, rng), rng);
+      }
+      m = settleGame({ ...m, game: g });
+    }
+    const st = matchStats(m);
+    expect(st).toHaveLength(3);
+    const games = m.history.length;
+    // 勝ち数の合計は、ゲーム数以上（引き分けで複数人が勝つことがある）
+    expect(st.reduce((a, x) => a + x.wins, 0)).toBeGreaterThanOrEqual(games);
+    for (const x of st) {
+      expect(x.games).toBe(m.history.filter((h) => h.seatIds.includes(x.id)).length);
+      expect(x.spent).toBe(m.history.reduce((a, h) => a + (h.detail?.spent[x.id] ?? 0), 0));
+      expect(x.rank).toBeGreaterThanOrEqual(1);
+      if (x.bustedAt !== null) expect(x.bustedAt).toBeLessThanOrEqual(games);
+    }
+    // 順位 1 は持ち点が最も多い人
+    const top = st.find((x) => x.rank === 1)!;
+    expect(m.players.find((p) => p.id === top.id)!.chips).toBe(Math.max(...m.players.map((p) => p.chips)));
+  });
+});
+
+describe('前払いクレジット（B-11）', () => {
+  const finish = (g: GameState, rng: Rng) => {
+    while (g.phase !== 'result') g = apply(g, pendingSeats(g).length ? { type: 'timeout' } : { type: 'advance' }, rng);
+    return g;
+  };
+
+  it('料金はクレジットから払い、使った分は次のゲームの持ち越しポットへ。最終ゲームでは使い残しが全部ポットに入る', () => {
+    const rng = seededRng(31);
+    let m = createMatch({ initialChips: 1000, bet: 100, maxGames: 2, prepaid: true }, [0, 1, 2].map((i) => ({ id: `p${i}`, name: `P${i}` })));
+    expect(() => startGame(m, rng)).toThrow(GameError);
+    m = buyCredit(m, 'p0', 3);
+    expect(() => buyCredit(m, 'p0', 1)).toThrow(GameError); // 買えるのは 1 回だけ
+    expect(() => buyCredit(m, 'p1', 6)).toThrow(GameError); // 持ち点の半分まで
+    m = buyCredit(m, 'p1', 1);
+    m = buyCredit(m, null, null); // p2 は時間切れで 0
+    expect(m.credits).toEqual({ p0: 300, p1: 100, p2: 0 });
+    expect(m.players.map((p) => p.chips)).toEqual([700, 900, 1000]);
+    m = startGame(m, rng);
+    let g = m.game!;
+    const s0 = m.seatIds.indexOf('p0');
+    const s2 = m.seatIds.indexOf('p2');
+    g = run(g, [0, 1, 2, 3].map((k) => ({ type: 'peek', seat: s0, index: k }) as GameAction), rng);
+    expect(g.seats[s0]!.credit).toBe(275);
+    expect(g.seats[s0]!.stack).toBe(600); // 持ち点はベットの分だけ減る
+    g = run(g, [0, 1, 2].map((k) => ({ type: 'peek', seat: s2, index: k }) as GameAction), rng);
+    expect(() => apply(g, { type: 'peek', seat: s2, index: 3 }, rng)).toThrow('クレジットが足りない');
+    g = finish(g, rng);
+    m = settleGame({ ...m, game: g });
+    expect(m.credits!.p0).toBe(275);
+    expect(m.carry!.amount).toBe(25);
+    // 最終ゲーム: 使い残し（275 ＋ 100）が持ち越しポットに入り、追加めくりはできない
+    m = startGame(m, rng);
+    expect(m.game!.carryIn).toBe(25 + 375);
+    expect(m.credits).toEqual({ p0: 0, p1: 0, p2: 0 });
+    expect(m.game!.extraPeeks).toBe(false);
+  });
+
+  it('脱落した人の使い残しは次のゲームの持ち越しポットへ。残り 1 人で終わったら、その人が全部受け取る', () => {
+    const rng = seededRng(32);
+    let m = createMatch({ initialChips: 1000, bet: 100, maxGames: 10, prepaid: true, headsUp: true }, [0, 1].map((i) => ({ id: `p${i}`, name: `P${i}` })));
+    m = buyCredit(m, 'p0', 2);
+    m = buyCredit(m, 'p1', 4);
+    m = startGame(m, rng);
+    const total = 2000;
+    let g = finish(m.game!, rng);
+    // p1 を脱落させる（失った分は p0 へ）
+    const i1 = m.seatIds.indexOf('p1');
+    const i0 = m.seatIds.indexOf('p0');
+    g.result!.stacks[i0]! += g.result!.stacks[i1]!;
+    g.result!.stacks[i1] = 0;
+    m = settleGame({ ...m, game: g });
+    expect(m.finished).toBe(true);
+    expect(m.players.find((p) => p.id === 'p0')!.chips).toBe(total);
+    expect(m.players.find((p) => p.id === 'p1')!.chips).toBe(0);
   });
 });

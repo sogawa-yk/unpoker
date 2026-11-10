@@ -689,3 +689,40 @@
     animation: none;
   }
 }
+
+/* ---- 前払いクレジット ---- */
+.pg.buying {
+  gap: 12px;
+}
+.buy-notes {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  color: var(--hakuai);
+  display: grid;
+  gap: 4px;
+}
+.buy-stepper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+}
+.buy-stepper .st-btn {
+  width: 52px;
+  height: 52px;
+  font-size: 24px;
+}
+.buy-value {
+  display: grid;
+  justify-items: center;
+  min-width: 120px;
+}
+.buy-value b {
+  font-size: 34px;
+  color: var(--kin-hi);
+  font-variant-numeric: tabular-nums;
+}
+.buy-value small {
+  color: var(--hakuai);
+}

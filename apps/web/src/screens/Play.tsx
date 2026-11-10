@@ -6,7 +6,7 @@ import type { GameActionMsg } from '../../../server/src/protocol.ts';
 import { Card, cardName } from '../components/Card.tsx';
 import { AdvicePanel, adviceNow, arrangePlan, topicNow } from '../components/Advice.tsx';
 import { Chips, ConnBadge, Gauge, HoldButton, PaidButton, StackChips, signed, Toast } from '../components/bits.tsx';
-import { carryNext, challengeHands, potNow, provisionalRank, shownBoard, type ChallengeRole } from '../game.ts';
+import { carryNext, challengeHands, potNow, provisionalRank, shownBoard, walletOf, type ChallengeRole } from '../game.ts';
 import { useSwapAnimation } from '../components/TableBits.tsx';
 import { outlookStage, PhoneOutlook } from '../components/Outlook.tsx';
 import { savedToken, useRoom, type Room, type RoomView } from '../net.ts';
@@ -39,7 +39,7 @@ export function PlayScreen({ roomId }: { roomId: string }) {
       ) : s.status === 'lobby' ? (
         s.hostId === s.you.playerId ? <HostLobby room={room} s={s} /> : <Waiting s={s} />
       ) : s.status === 'finished' ? (
-        <PhoneFinished s={s} />
+        <PhoneFinished room={room} s={s} />
       ) : (
         <PhoneGame room={room} s={s} />
       )}
@@ -97,7 +97,7 @@ function Waiting({ s }: { s: RoomView }) {
   );
 }
 
-function PhoneFinished({ s }: { s: RoomView }) {
+function PhoneFinished({ room, s }: { room: Room; s: RoomView }) {
   const myId = s.you.role === 'player' ? s.you.playerId : '';
   const rank = (s.ranking ?? []).indexOf(myId) + 1;
   const me = s.players.find((p) => p.id === myId);
@@ -108,7 +108,78 @@ function PhoneFinished({ s }: { s: RoomView }) {
         <Chips n={me?.chips ?? 0} />
       </p>
       {tablelessOf(s).on ? <FinalList s={s} /> : <p className="muted">対局が終わりました。結果はテーブルで</p>}
+      {tablelessOf(s).on && s.hostId === myId && (
+        <button className="btn btn-shu btn-wide" onClick={() => room.send({ t: 'rematch' })}>
+          同じメンバーで次の対局
+        </button>
+      )}
     </Centered>
+  );
+}
+
+// ---------------------------------------------------------------- 前払いクレジット（B-11）
+
+/** 対局の最初に、前払いクレジットを買う */
+function PhoneBuying({ room, s }: { room: Room; s: RoomView }) {
+  const myId = s.you.role === 'player' ? s.you.playerId : '';
+  const me = s.players.find((p) => p.id === myId);
+  const b = s.buying!;
+  const [units, setUnits] = useState(0);
+  const unit = b.unit;
+  const max = me ? Math.max(0, Math.min(10, Math.floor(me.chips / 2 / unit))) : 0;
+  const peek = Math.ceil(unit / 4);
+  const advice = [Math.ceil(unit / 10), Math.ceil(unit / 4)];
+  const done = b.done.includes(myId);
+  const waiting = s.players.filter((p) => !b.done.includes(p.id)).map((p) => p.name);
+  if (done)
+    return (
+      <Centered>
+        <p className="ply-big">クレジット {(me?.credit ?? 0).toLocaleString()}</p>
+        <p className="muted">{waiting.length ? `${waiting.join('・')} が選んでいます` : 'まもなく始まります'}</p>
+        <MyGaugeLite room={room} />
+      </Centered>
+    );
+  return (
+    <div className="pg buying">
+      <MyGaugeLite room={room} />
+      <h2 className="decision-title">前払いクレジットを買う</h2>
+      <p className="decision-body">
+        追加でめくる（1 枚 {peek}）と AI 相談（{advice[0]}〜{advice[1]}）の料金は、この対局ではクレジットから払います。買えるのは今だけです。
+      </p>
+      <ul className="buy-notes">
+        <li>使った分は、次のゲームの持ち越しポットに入ります</li>
+        <li>最終ゲームでは使えません。使い残しは最終ゲームの持ち越しポットに全部入ります</li>
+      </ul>
+      <div className="buy-stepper" role="group" aria-label="買う量">
+        <button className="st-btn" aria-label="1 単位減らす" disabled={units <= 0} onClick={() => setUnits(units - 1)}>
+          −
+        </button>
+        <span className="buy-value">
+          <b>{(units * unit).toLocaleString()}</b>
+          <small>
+            {units} × {unit}
+          </small>
+        </span>
+        <button className="st-btn" aria-label="1 単位増やす" disabled={units >= max} onClick={() => setUnits(units + 1)}>
+          ＋
+        </button>
+      </div>
+      <p className="muted small">
+        持ち点 {(me?.chips ?? 0).toLocaleString()} → {((me?.chips ?? 0) - units * unit).toLocaleString()}（買えるのは持ち点の半分まで）
+      </p>
+      <HoldButton className="btn btn-shu btn-wide" onDone={() => room.send({ t: 'buy', units })} ms={500}>
+        {units === 0 ? '長押しで買わずに始める' : `長押しで ${(units * unit).toLocaleString()} 買う`}
+      </HoldButton>
+    </div>
+  );
+}
+
+/** 持ち時間のゲージだけ（ゲームが始まる前の画面用） */
+function MyGaugeLite({ room }: { room: Room }) {
+  return (
+    <div className="pg-gauge">
+      <Gauge room={room} />
+    </div>
   );
 }
 
@@ -119,6 +190,7 @@ function PhoneGame({ room, s }: { room: Room; s: RoomView }) {
   const myId = s.you.role === 'player' ? s.you.playerId : '';
   // 二重送信を防ぐ: 同じ状態（サーバー時刻）の間は 1 回だけ送る
   const sentAt = useRef({ key: -1, at: 0 });
+  if (s.buying) return <PhoneBuying room={room} s={s} />;
   if (s.betting) return <PhoneBetting room={room} s={s} />;
   if (!g || g.you === null) {
     const me = s.players.find((p) => p.id === myId);
@@ -171,6 +243,11 @@ function PhoneGameBody({
           <span className="paid-pill" title="追加めくりと AI 相談に払った額。次のゲームの持ち越しポットに入ります">
             <i className="coin" aria-hidden="true" />
             払った {me.peekFee + me.adviceFee}
+          </span>
+        )}
+        {me.credit !== null && (
+          <span className="paid-pill" title="前払いクレジットの残り。追加めくりと AI 相談に使えます">
+            クレジット {me.credit.toLocaleString()}
           </span>
         )}
         <span className="pg-bet muted">ベット {g.bet}</span>
@@ -294,7 +371,8 @@ function MyGauge({ room, g }: { room: Room; g: GameView }) {
   return <div className="pg-gauge">{mine ? <Gauge room={room} /> : <div className="gauge" style={{ visibility: 'hidden' }} />}</div>;
 }
 
-const ALL = [0, 1, 2, 3, 4, 5, 6];
+/** 手札の位置（ふつうは 7 枚。特殊効果カードで 5・9・11 枚になる） */
+const handIdx = (me: SeatView) => [...Array(me.cards.length).keys()];
 
 function Placement({ g, me, act, name }: { g: GameView; me: SeatView; act: (a: GameActionMsg) => void; name: (i: number) => string }) {
   const tableless = useTableless();
@@ -309,13 +387,14 @@ function Placement({ g, me, act, name }: { g: GameView; me: SeatView; act: (a: G
 
   const peeking = me.peekedCount < 3;
   const price = g.peekPrice;
-  const canBuy = !peeking && g.extraPeeks && me.stack >= price;
+  const w = walletOf(me);
+  const canBuy = !peeking && g.extraPeeks && w.amount >= price;
   const extra = Math.max(0, me.peekedCount - 3);
   const buyNote = !g.extraPeeks
     ? '最終ゲームなので、追加ではめくれません'
-    : me.stack < price
-      ? '持ち点が足りないので、追加ではめくれません'
-      : `伏せた札は 1 枚 ${price} 点で追加でめくれます。料金は次のゲームの持ち越しポットに入ります`;
+    : w.amount < price
+      ? `${w.label}が足りないので、追加ではめくれません`
+      : `伏せた札は 1 枚 ${price} 点で追加でめくれます（${w.label}から払う）。料金は次のゲームの持ち越しポットに入ります`;
   return (
     <>
       <Instruction
@@ -329,7 +408,7 @@ function Placement({ g, me, act, name }: { g: GameView; me: SeatView; act: (a: G
       )}
       {boardKnown.length > 0 && <MiniBoard cards={boardKnown} hidden={g.boardOwners.filter((o) => o === -1).length} label="場札" />}
       <div className="hand7">
-        {ALL.map((k) => {
+        {handIdx(me).map((k) => {
           const known = me.known.includes(k);
           const card = me.cards[k] ?? null;
           const selectable = !peeking && known;
@@ -392,7 +471,8 @@ function Placement({ g, me, act, name }: { g: GameView; me: SeatView; act: (a: G
         {!peeking && buy !== null && (
           <PaidButton
             cost={price}
-            stack={me.stack}
+            stack={w.amount}
+            walletLabel={w.label}
             onDone={() => {
               act({ type: 'peek', index: buy });
               setBuy(null);
@@ -417,9 +497,10 @@ function Placement({ g, me, act, name }: { g: GameView; me: SeatView; act: (a: G
  * 伏せ札は確率的にはどこに置いても同じだが、自分で置いて決めることを大事にする（おまかせの初期配置はしない）
  */
 function Arrange({ g, me, act, name }: { g: GameView; me: SeatView; act: (a: GameActionMsg) => void; name: (i: number) => string }) {
-  const hand = ALL.filter((k) => k !== me.boardIndex);
-  // slots[pos] = 置いた札の位置（手札の index）。pos 0-1 が 1 組目、2-3 が 2 組目、4-5 が 3 組目
-  const [slots, setSlots] = useState<(number | null)[]>([null, null, null, null, null, null]);
+  const hand = handIdx(me).filter((k) => k !== me.boardIndex);
+  const nSets = hand.length / 2;
+  // slots[pos] = 置いた札の位置（手札の index）。pos 0-1 が 1 組目、2-3 が 2 組目、…
+  const [slots, setSlots] = useState<(number | null)[]>(() => Array(hand.length).fill(null));
   const [sel, setSel] = useState<number | null>(null); // 選んでいる札（手札の index）
   // ドラッグを離した直後のタップは無視する（離した瞬間にタップ扱いになって札が選ばれてしまうため）
   const draggedAt = useRef(0);
@@ -488,7 +569,7 @@ function Arrange({ g, me, act, name }: { g: GameView; me: SeatView; act: (a: Gam
   return (
     <>
       <Instruction
-        main={full ? '長押しでこの 3 組に決める' : `札を 3 組に分ける（あと ${tray.length} 枚）`}
+        main={full ? `長押しでこの ${nSets} 組に決める` : `札を ${nSets} 組に分ける（あと ${tray.length} 枚）`}
         sub="札をドラッグするか、札→枠の順にタップして置きます。置いた札も動かせます"
       />
       <div className="placed-row">
@@ -497,7 +578,7 @@ function Arrange({ g, me, act, name }: { g: GameView; me: SeatView; act: (a: Gam
       </div>
       <LayoutGroup>
         <div className="sets3">
-          {[0, 1, 2].map((si) => (
+          {[...Array(nSets).keys()].map((si) => (
             <div className={`set slotset${slots[si * 2] !== null && slots[si * 2 + 1] !== null ? ' done' : ''}`} key={si}>
               {[0, 1].map((j) => {
                 const pos = si * 2 + j;
@@ -530,8 +611,12 @@ function Arrange({ g, me, act, name }: { g: GameView; me: SeatView; act: (a: Gam
       </LayoutGroup>
       <div className="pg-actions">
         <AdvicePanel g={g} me={me} act={act} name={name} compact />
-        <HoldButton className="btn btn-wide" disabled={!full} onDone={() => act({ type: 'arrange', sets: [[slots[0]!, slots[1]!], [slots[2]!, slots[3]!], [slots[4]!, slots[5]!]] })}>
-          {full ? '長押しでこの組に決める' : '6 枚すべて置くと決められます'}
+        <HoldButton
+          className="btn btn-wide"
+          disabled={!full}
+          onDone={() => act({ type: 'arrange', sets: [...Array(nSets).keys()].map((i) => [slots[i * 2]!, slots[i * 2 + 1]!] as [number, number]) })}
+        >
+          {full ? '長押しでこの組に決める' : `${hand.length} 枚すべて置くと決められます`}
         </HoldButton>
       </div>
     </>
@@ -833,6 +918,12 @@ function useBot(room: Room, on: boolean, mash = false, consult = false) {
   const key = room.state ? `${room.state.serverTime}` : '';
   useEffect(() => {
     const st = room.state;
+    if (on && st?.buying && st.you.role === 'player' && !st.buying.done.includes(st.you.playerId)) {
+      // 開発用: 前払いクレジットは 0〜2 単位をランダムに買う（相談するボットは 2 単位）
+      const units = consult ? 2 : Math.floor(Math.random() * 3);
+      const t = setTimeout(() => room.send({ t: 'buy', units }), 800);
+      return () => clearTimeout(t);
+    }
     if (on && st?.betting && st.you.role === 'player' && st.betting.dealerId === st.you.playerId) {
       const opts = st.betting.options;
       const amount = opts[Math.floor(Math.random() * opts.length)]!;
@@ -843,17 +934,17 @@ function useBot(room: Room, on: boolean, mash = false, consult = false) {
     const me = g.seats[g.you]!;
     let a: GameActionMsg | null = null;
     if (g.phase === 'placement') {
-      if (me.peekedCount < 3) a = { type: 'peek', index: ALL.find((k) => !me.known.includes(k))! };
+      if (me.peekedCount < 3) a = { type: 'peek', index: handIdx(me).find((k) => !me.known.includes(k))! };
       else if (!me.placed) {
         const known = me.known.map((index) => ({ index, card: me.cards[index]! }));
         a = { type: 'place', index: chooseBoardIndex(known) };
       } else if (!me.arranged) {
         const known = me.known.filter((k) => k !== me.boardIndex).map((index) => ({ index, card: me.cards[index]! }));
-        const unknown = ALL.filter((k) => k !== me.boardIndex && !me.known.includes(k));
+        const unknown = handIdx(me).filter((k) => k !== me.boardIndex && !me.known.includes(k));
         a = { type: 'arrange', sets: arrangeSets(known, unknown) };
       }
     } else if (g.phase === 'reveal' && g.revealTurn === g.you) {
-      const left = ALL.filter((k) => k !== me.boardIndex && !me.revealed.includes(k));
+      const left = handIdx(me).filter((k) => k !== me.boardIndex && !me.revealed.includes(k));
       a = { type: 'flip', index: left[Math.floor(Math.random() * left.length)]! };
     } else if (consult && (g.phase === 'declare' || g.phase === 'join') && g.extraPeeks && topicNow(g, me) && !adviceNow(g, me) && me.stack > g.advicePrice.challenge) {
       // 開発用: チャレンジの判断の前に AI に相談し、答えを見てから（数秒後に）決める

@@ -21,6 +21,7 @@ const FAST = {
   rouletteStart: 300,
   rouletteStop: 300,
   bet: 300,
+  buy: 300,
 };
 
 type App = Awaited<ReturnType<typeof createApp>>;
@@ -96,6 +97,7 @@ class Client {
 /** 状態を見て、自分の操作があれば 1 つ送る */
 function bot(c: Client) {
   const s = c.state;
+  if (s?.buying && !c.idle && !s.buying.done.includes(c.playerId)) return c.send({ t: 'buy', units: c.consult ? 2 : 0 });
   const g = s?.game;
   if (!g || g.you === null || c.idle) return;
   const me = g.seats[g.you]!;
@@ -332,6 +334,9 @@ describe('サーバー', () => {
     players.forEach((p) => (p.idle = true));
     table.send({ t: 'start' });
     const p = players[0]!;
+    // 前払いクレジットを 1 単位（100）買う。ほかの人は時間切れで 0
+    await p.until(() => p.state!.buying);
+    p.send({ t: 'buy', units: 1 });
     await p.until(() => p.state!.game?.phase === 'placement');
     const seat = p.state!.game!.you!;
     for (const index of [0, 1, 2]) p.send({ t: 'action', action: { type: 'peek', index } });
@@ -339,6 +344,9 @@ describe('サーバー', () => {
     p.send({ t: 'action', action: { type: 'consult' } });
     await p.until(() => p.state!.game!.seats[seat]!.advice.length === 1);
     expect(p.state!.game!.seats[seat]!.adviceFee).toBe(10);
+    // 料金はクレジットから払い、持ち点は減らない
+    expect(p.state!.players.find((x) => x.id === p.playerId)!.credit).toBe(90);
+    expect(p.state!.game!.seats[seat]!.stack).toBe(800);
     await table.until(() => table.state!.game!.seats[seat]!.consulted.length === 1);
     expect(table.state!.game!.seats[seat]!.advice).toEqual([]);
     expect(JSON.stringify(players[1]!.state)).not.toContain('"candidates"');
@@ -390,6 +398,9 @@ describe('サーバー', () => {
     players.forEach((p) => (p.idle = true));
     table.send({ t: 'start' });
     const p = players[0]!;
+    // 前払いクレジットを 1 単位（100）買う。ほかの人は時間切れで 0
+    await p.until(() => p.state!.buying);
+    p.send({ t: 'buy', units: 1 });
     await p.until(() => p.state!.game?.phase === 'placement');
     table.send({ t: 'pause', paused: true });
     const seat = p.state!.game!.you!;
@@ -529,6 +540,38 @@ describe('サーバー', () => {
     await host.until(() => true);
     const saved = (await store.loadAll()).find((d) => d.id === roomId)!;
     expect(saved.hostId).toBe(host.playerId);
+  });
+
+  it('同じメンバーで次の対局: 持ち点を戻し、前の対局の成績を残し、記録は別の対局になる', async () => {
+    const records = new MemoryRecordStore();
+    const { url, app } = await start(undefined, undefined, {}, records);
+    const { table, players, roomId } = await setupRoom(url, ['あ', 'い', 'う']);
+    table.send({ t: 'configure', config: { initialChips: 1000, bet: 100, maxGames: 1 } });
+    await table.until(() => table.state!.config.maxGames === 1);
+    table.send({ t: 'start' });
+    await playUntilResult(table, players, 1);
+    table.send({ t: 'nextGame' });
+    await table.until(() => table.state!.status === 'finished');
+    const tokens = players.map((p) => p.token);
+    // 対局が終わったので、同じメンバーで次の対局へ
+    table.send({ t: 'rematch' });
+    await table.until(() => table.state!.status === 'lobby');
+    const s = table.state!;
+    expect(s.matchNo).toBe(2);
+    expect(s.players.map((p) => p.chips)).toEqual([1000, 1000, 1000]);
+    expect(s.players.every((p) => p.connected)).toBe(true);
+    const room = app.rooms.rooms.get(roomId)!;
+    expect(room.data.prevStats!.matchNo).toBe(1);
+    expect(room.data.prevStats!.stats.map((x) => x.id).sort()).toEqual(s.players.map((p) => p.id).sort());
+    expect(room.data.prevStats!.stats.every((x) => x.games === 1)).toBe(true);
+    // 同じトークンのまま、次の対局を遊べる
+    table.send({ t: 'start' });
+    await playUntilResult(table, players, 1);
+    expect(players.map((p) => p.token)).toEqual(tokens);
+    await room.flush();
+    await app.close();
+    apps.splice(apps.indexOf(app), 1);
+    expect([...records.matches.keys()].sort()).toEqual([`${roomId}-1`, `${roomId}-2`]);
   });
 
   it('/healthz に応答する', async () => {

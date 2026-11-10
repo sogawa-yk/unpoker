@@ -159,3 +159,7 @@ export function challengeHands(g: GameView, board: Card[]): { seat: number; role
   rows.forEach((r) => (r.leader = r.score === top));
   return rows.sort((a, b) => b.score - a.score || a.seat - b.seat);
 }
+
+/** 追加めくりと AI 相談に使える額と、その呼び名（前払い制ならクレジット、そうでなければ持ち点。B-11） */
+export const walletOf = (me: SeatView): { amount: number; label: string } =>
+  me.credit !== null && me.credit !== undefined ? { amount: me.credit, label: 'クレジット' } : { amount: me.stack, label: '持ち点' };

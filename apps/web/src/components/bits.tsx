@@ -121,6 +121,7 @@ export const signed = (n: number) => (n > 0 ? `+${n.toLocaleString()}` : n.toLoc
 export function PaidButton({
   cost,
   stack,
+  walletLabel = '持ち点',
   onDone,
   disabled,
   note,
@@ -128,6 +129,8 @@ export function PaidButton({
 }: {
   cost: number;
   stack: number;
+  /** 払う元の呼び名（既定は持ち点。前払い制ならクレジット） */
+  walletLabel?: string;
   onDone: () => void;
   disabled?: boolean;
   /** ボタンの下の説明（払えないときは理由） */
@@ -144,7 +147,7 @@ export function PaidButton({
       </HoldButton>
       {!disabled && (
         <p className="paid-receipt">
-          持ち点 <b>{stack.toLocaleString()}</b> → <b>{(stack - cost).toLocaleString()}</b>。料金は次のゲームの持ち越しポットへ
+          {walletLabel} <b>{stack.toLocaleString()}</b> → <b>{(stack - cost).toLocaleString()}</b>。料金は次のゲームの持ち越しポットへ
         </p>
       )}
       {note && <p className="paid-note">{note}</p>}
