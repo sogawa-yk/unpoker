@@ -31,14 +31,16 @@ export const ConfigMsg = z.object({
 
 const roomId = z.string().regex(/^[A-Z2-9]{6}$/);
 const token = z.string().min(20).max(100);
+/** 端末に保存したプレイヤー ID（記録用。古い端末は送らない） */
+const deviceId = z.string().regex(/^[A-Za-z0-9-]{8,64}$/).optional();
 
 export const ClientMsg = z.discriminatedUnion('t', [
   /** テーブル（iPad）がルームを作る */
   z.object({ t: z.literal('createRoom') }),
   /** スマホがルームを作って、そのまま親機として参加する（テーブルなしで遊ぶ） */
-  z.object({ t: z.literal('hostRoom'), name: z.string().trim().min(1).max(12) }),
+  z.object({ t: z.literal('hostRoom'), name: z.string().trim().min(1).max(12), deviceId }),
   /** スマホがルームに参加する */
-  z.object({ t: z.literal('join'), roomId, name: z.string().trim().min(1).max(12) }),
+  z.object({ t: z.literal('join'), roomId, name: z.string().trim().min(1).max(12), deviceId }),
   /** 再接続（テーブルもスマホも） */
   z.object({ t: z.literal('resume'), roomId, token }),
   /** ルーム設定の変更（テーブルか親機、待機中のみ） */

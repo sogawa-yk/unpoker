@@ -5,6 +5,9 @@ import { createApp } from '../src/app.ts';
 import { MemoryStore } from '../src/store.ts';
 import type { Explainer } from '../src/explain.ts';
 import type { RoomView, ServerMsg } from '../src/protocol.ts';
+import { MemoryRecordStore, type RecordStore } from '../src/records.ts';
+import { streamRng } from '../src/ids.ts';
+import { replayMatch } from '@unpoker/core';
 
 const FAST = {
   placement: 1500,
@@ -26,8 +29,8 @@ afterEach(async () => {
   await Promise.all(apps.splice(0).map((a) => a.close()));
 });
 
-async function start(store = new MemoryStore(), explainer?: Explainer) {
-  const app = await createApp({ store, timing: FAST, explainer });
+async function start(store = new MemoryStore(), explainer?: Explainer, timing: Record<string, number> = {}, records?: RecordStore) {
+  const app = await createApp({ store, timing: { swapIntro: 0, minSpin: 0, challengeBanner: 0, ...FAST, ...timing }, explainer, records });
   apps.push(app);
   await new Promise<void>((r) => app.server.listen(0, r));
   const port = (app.server.address() as AddressInfo).port;
@@ -46,6 +49,8 @@ class Client {
   states: RoomView[] = [];
   /** true にすると、自分の番が来ても操作しない（時間切れの確認用） */
   idle = false;
+  /** true にすると、配置で AI に相談してから進める */
+  consult = false;
   constructor(url: string) {
     this.ws = new WebSocket(url);
     this.ws.on('message', (raw) => {
@@ -97,6 +102,7 @@ function bot(c: Client) {
   const send = (action: unknown) => c.send({ t: 'action', action });
   switch (g.phase) {
     case 'placement':
+      if (c.consult && g.extraPeeks && me.consulted.length === 0 && me.peekedCount >= 3) return send({ type: 'consult' });
       if (me.peekedCount < 3) return send({ type: 'peek', index: [0, 1, 2, 3, 4, 5, 6].find((k) => !me.known.includes(k)) });
       if (!me.placed) return send({ type: 'place', index: me.known[0] });
       if (!me.arranged) {
@@ -166,6 +172,80 @@ async function playUntilResult(table: Client, players: Client[], gameNo: number)
 }
 
 describe('サーバー', () => {
+  it('対局の記録から、同じ対局を 1 手ずつ再現できる', async () => {
+    const records = new MemoryRecordStore();
+    const { url, app } = await start(undefined, undefined, {}, records);
+    const { table, players, roomId } = await setupRoom(url, ['あ', 'い', 'う']);
+    players[0]!.consult = true; // AI 相談（乱数で見込みを数える）も再現できること
+    table.send({ t: 'configure', config: { initialChips: 1000, bet: 100, maxGames: 3 } });
+    await table.until(() => table.state!.config.maxGames === 3);
+    table.send({ t: 'start' });
+    for (let n = 1; n <= 3; n++) {
+      await playUntilResult(table, players, n);
+      table.send({ t: 'nextGame' });
+      await table.until(() => table.state!.gameNo === n + 1 || table.state!.status === 'finished');
+    }
+    await table.until(() => table.state!.status === 'finished');
+    const room = app.rooms.rooms.get(roomId)!;
+    await app.close();
+    apps.splice(apps.indexOf(app), 1);
+    const match = [...records.matches.values()][0]!;
+    expect(match.matchId).toBe(`${roomId}-1`);
+    expect(match.endedAt).not.toBeNull();
+    expect(match.ranking).toHaveLength(3);
+    expect(match.seed).toMatch(/^[0-9a-f]{64}$/);
+    // 操作を順に当て直すと、サーバーの最後の状態と一致する
+    const ops = records.opsOf(match.matchId);
+    expect(ops.some((o) => o.op === 'game' && o.action.type === 'consult')).toBe(true);
+    const replayed = replayMatch(ops, (i) => streamRng(match.seed, i));
+    expect(replayed).toEqual(room.data.match);
+    // ゲームごとの行: 配った札と結果
+    const games = [...records.games.values()].sort((a, b) => a.gameNo - b.gameNo);
+    expect(games.map((g) => g.gameNo)).toEqual([1, 2, 3]);
+    for (const g of games) {
+      expect(g.result).not.toBeNull();
+      expect(g.hands.flat().length + g.initialBoard.length + g.deck.length).toBe(52);
+      // 持ち点の増減の合計 ＝ 受け取った持ち越しポット − 次へ持ち越した料金
+      expect(Object.values(g.result!.delta).reduce((a, b) => a + b, 0)).toBe(g.carryIn - g.result!.carryOut!);
+    }
+    // 端末には種を送らない
+    for (const c of [table, ...players]) expect(JSON.stringify(c.states)).not.toContain(match.seed);
+  });
+
+  it('ルーレットを連打しても、顔ぶれの発表と回っている光を飛ばさない', async () => {
+    const { url } = await start(undefined, undefined, { swapIntro: 600, minSpin: 500, challengeBanner: 500, rouletteStart: 5000, rouletteStop: 5000, swap: 300 });
+    const { table, players } = await setupRoom(url, ['あ', 'い', 'う']);
+    table.send({ t: 'start' });
+    // 最下位が宣言し、入れ替えの場面に入るまで進める（3 人なら 2 位が便乗を選ぶ場面を通る）
+    let joinAt = 0;
+    await table.until(() => {
+      players.forEach(bot);
+      if (!joinAt && table.state!.game?.phase === 'join') joinAt = Date.now();
+      return table.state!.game?.phase === 'swap';
+    }, 20000);
+    const enteredAt = Date.now();
+    const g = table.state!.game!;
+    const roller = players.find((p) => p.state!.game!.you === g.challenge!.roller)!;
+    const before = roller.msgs.length;
+    // 画面の切り替え中に連打する: 回す・止めるを何度も送る
+    for (let i = 0; i < 3; i++) {
+      roller.send({ t: 'action', action: { type: 'roulette', cmd: 'start' } });
+      roller.send({ t: 'action', action: { type: 'roulette', cmd: 'stop' } });
+    }
+    await table.until(() => table.state!.game!.challenge?.roulette === 'spinning');
+    const spinAt = Date.now();
+    await table.until(() => table.state!.game!.challenge?.roulette === 'stopped');
+    const stopAt = Date.now();
+    expect(spinAt - enteredAt).toBeGreaterThanOrEqual(550);
+    // 便乗がすぐ締め切られても、「挑戦」の発表（500）が終わってから顔ぶれの発表（600）をする
+    if (joinAt) expect(spinAt - joinAt).toBeGreaterThanOrEqual(1050);
+    expect(stopAt - spinAt).toBeGreaterThanOrEqual(450);
+    // 連打しても、エラーにならず、入れ替えは 1 回だけ
+    expect(roller.msgs.slice(before).filter((m) => m.t === 'error')).toEqual([]);
+    await table.until(() => table.state!.game!.phase === 'result', 5000);
+    expect(table.state!.game!.challenge!.swap).not.toBeNull();
+  });
+
   it('3 人で 2 ゲーム遊べ、情報が漏れず、持ち点の合計が保たれる', async () => {
     const { url } = await start();
     const { table, players } = await setupRoom(url, ['あ', 'い', 'う']);

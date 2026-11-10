@@ -126,7 +126,7 @@ export class Rooms {
       case 'hostRoom': {
         if (conn.roomId) throw new RoomError('すでにルームに入っている');
         const r = this.create();
-        const p = r.join(msg.name, true);
+        const p = r.join(msg.name, true, msg.deviceId ?? null);
         Object.assign(conn, { role: 'player', roomId: r.id, playerId: p.id });
         conn.send({ t: 'welcome', roomId: r.id, token: p.token, role: 'player', playerId: p.id });
         r.attach(conn);
@@ -137,7 +137,7 @@ export class Rooms {
         if (conn.roomId) throw new RoomError('すでにルームに入っている');
         const r = this.rooms.get(msg.roomId);
         if (!r) return conn.send({ t: 'error', message: 'ルームが見つからない', code: 'room_not_found' });
-        const p = r.join(msg.name);
+        const p = r.join(msg.name, false, msg.deviceId ?? null);
         Object.assign(conn, { role: 'player', roomId: r.id, playerId: p.id });
         conn.send({ t: 'welcome', roomId: r.id, token: p.token, role: 'player', playerId: p.id });
         r.attach(conn);

@@ -154,6 +154,17 @@ sim/            … 既存のシミュレーター（core ができたら core �
 - **量**：1 ゲームの操作はおよそ百件、数十 KB の見込み（未検証）
 - `rooms` テーブル（24 時間の TTL。再起動から立ち直るための最新状態）はそのまま残す。記録とは役割を分ける
 
+**実装（2026-11-10）**
+
+- 状態を変える操作は、すべて `packages/core/src/replay.ts` の `reduceMatch(match, op, rng)` を通す。操作は `create`（対局を作る）、`start`、`bet`、`game`（ゲーム中の操作。持ち時間切れと演出の進行も含む）、`next`（結果の反映と次のゲーム）
+- 乱数は `apps/server/src/ids.ts` の `streamRng(seed, eventNo)`。種と操作の番号から SHA-256 で作るので、見えている札から先の札を割り出せない
+- 再現：`replayMatch(ops, (i) => streamRng(seed, i))`。サーバーのテストで、3 ゲーム（AI 相談を含む）を当て直すと最後の状態が一致することを確かめている
+- 書き込みは `apps/server/src/records.ts` の `Recorder`。順番どおりに書き、失敗したら待って書き直す（最大 5 回）。書けなくてもゲームは止めない
+- 対局 ID は「ルーム ID − そのルームでの対局の番号」（例 `ABC234-1`）
+- AI 相談の説明文は、`game_events` に負の番号（−1 から下へ）で入れる
+- 環境変数 `RECORDS`（memory / file / nosql / off）。手元で `STORE=file` なら `.data/records/` に JSON Lines で書く
+- テーブルは Terraform（`infra/app.tf` の `oci_nosql_table.records`）で作る。**本番への反映（terraform apply）はまだ**
+
 ## 8. 未検証・未決の項目
 
 2026-11-07 の構築で確かめたこと:
