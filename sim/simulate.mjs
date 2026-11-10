@@ -64,7 +64,7 @@ function challengeExperiment(n) {
   return { byRank, allIn, catCount, nutCount, tieFirst };
 }
 
-for (const n of [3, 4]) {
+for (const n of (process.env.PLAYERS ?? '2,3,4').split(',').map(Number)) {
   console.log(`\n========== ${n} 人プレイ（${N} ゲーム） ==========`);
 
   const se = strategyExperiment(n);

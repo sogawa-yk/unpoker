@@ -1,5 +1,6 @@
 // 対局（ゲームの連続プレイ）。rules.md 付録 B-0・B-1
 import { clone, type Rng } from './cards.ts';
+import { categoryOf, evaluate } from './evaluator.ts';
 import { GameError, newGame, paidExtras, type GameState } from './game.ts';
 
 export type BetMode = 'fixed' | 'rotating';
@@ -8,7 +9,7 @@ export interface MatchConfig {
   initialChips: number;
   /** 固定ベット額（ベット方式が固定のとき） */
   bet: number;
-  /** 規定ゲーム数。null なら無制限 */
+  /** 規定ゲーム数。無制限（null）は 2026-11-10 に廃止。古い保存データには残っていることがある */
   maxGames: number | null;
   /** ベット方式（rules.md B-0）。古い設定には無い（固定として扱う） */
   betMode?: BetMode;
@@ -18,6 +19,8 @@ export interface MatchConfig {
   betStep?: number;
   /** 持ち時間（過ぎたら自動で操作して進める）を使うか。古い設定には無い（使う） */
   timeLimit?: boolean;
+  /** ヘッズアップ: 3 人以上で始めた対局が残り 2 人になっても続けるか（B-0・B-1）。古い設定には無い（続けない） */
+  headsUp?: boolean;
 }
 
 export const DEFAULT_CONFIG: MatchConfig = {
@@ -29,6 +32,7 @@ export const DEFAULT_CONFIG: MatchConfig = {
   maxBet: 500,
   betStep: 50,
   timeLimit: true,
+  headsUp: false,
 };
 
 export const BET_STEPS = [10, 50, 100] as const;
@@ -52,6 +56,28 @@ export interface GameRecord {
   carryIn?: number;
   /** このゲームで次へ持ち越した額 */
   carryOut?: number;
+  /** 成績の集計用（特殊効果カードを配る条件。古い記録には無い） */
+  detail?: GameDetail;
+}
+
+/** 1 ゲームの成績（プレイヤー ID で持つ） */
+export interface GameDetail {
+  firsts: string[];
+  lasts: string[];
+  /** チャレンジの参加者（宣言、強制参加、便乗）。チャレンジが無ければ空 */
+  declarers: string[];
+  forced: string[];
+  joiners: string[];
+  /** 最終の役の種類（0 ハイカード 〜 8 ストレートフラッシュ） */
+  category: Record<string, number>;
+  /** 自分の札が役を上げなかった（最終の役が、場札 5 枚だけの役と同じ種類） */
+  boardOnly: string[];
+  /** 仮 1 位だったのに、チャレンジで勝てなかった */
+  reversed: string[];
+  /** 相手のナッツで負けた */
+  nutLosers: string[];
+  /** 追加めくりと AI 相談に使った額 */
+  spent: Record<string, number>;
 }
 
 /** 次のゲームへ持ち越すポット。対局が終わって受け取る人がいなければ、払った人へ返す */
@@ -84,7 +110,7 @@ export interface MatchState {
 }
 
 export function createMatch(config: MatchConfig, players: { id: string; name: string }[]): MatchState {
-  if (players.length < 3 || players.length > 4) throw new GameError('参加人数は 3 人か 4 人');
+  if (players.length < 2 || players.length > 4) throw new GameError('参加人数は 2〜4 人');
   validateConfig(config);
   return {
     config: { ...config },
@@ -105,7 +131,7 @@ export function validateConfig(c: MatchConfig) {
   const ok =
     Number.isInteger(c.initialChips) && c.initialChips >= 500 && c.initialChips <= 10000 && c.initialChips % 100 === 0 &&
     Number.isInteger(c.bet) && c.bet >= 10 && c.bet <= 1000 && c.bet % 10 === 0 &&
-    (c.maxGames === null || (Number.isInteger(c.maxGames) && c.maxGames >= 1 && c.maxGames <= 50));
+    Number.isInteger(c.maxGames) && c.maxGames! >= 1 && c.maxGames! <= 50;
   if (!ok) throw new GameError('ルーム設定が範囲外');
   if (c.betMode !== undefined && c.betMode !== 'fixed' && c.betMode !== 'rotating') throw new GameError('ベット方式が不正');
   if (c.betMode === 'rotating') {
@@ -121,6 +147,17 @@ export function validateConfig(c: MatchConfig) {
 
 const active = (m: MatchState) => m.players.filter((p) => p.chips > 0);
 
+/**
+ * 対局を終えるか（B-1）。残り 1 人、規定ゲーム数に到達、
+ * またはヘッズアップを続けない設定で、3 人以上で始めた対局が残り 2 人になったとき
+ */
+function shouldEnd(m: MatchState): boolean {
+  const left = active(m).length;
+  if (left <= 1) return true;
+  if (left === 2 && m.players.length >= 3 && !m.config.headsUp) return true;
+  return m.config.maxGames !== null && m.gameNo > m.config.maxGames;
+}
+
 /** 次のゲームを始める。始められない（残り 2 人以下、規定数に到達）なら対局を終える */
 export function startGame(m: MatchState, rng: Rng): MatchState {
   if (m.finished) throw new GameError('対局は終了している');
@@ -128,7 +165,7 @@ export function startGame(m: MatchState, rng: Rng): MatchState {
   if (m.betting) throw new GameError('親がベット額を選んでいる');
   const next = clone(m);
   const act = active(next);
-  if (act.length < 3 || (next.config.maxGames !== null && next.gameNo > next.config.maxGames)) return endMatch(next);
+  if (shouldEnd(next)) return endMatch(next);
   // 親: 最初はランダム、以降は席順で次の参加者（脱落者は飛ばす）
   let dealer: MatchPlayer;
   if (next.dealerId === null) {
@@ -220,6 +257,7 @@ export function settleGame(m: MatchState): MatchState {
     bet: g.bet,
     carryIn: g.carryIn,
     carryOut: r.carryOut,
+    detail: gameDetail(g, next.seatIds),
   });
   // 持ち越しポット: 今のゲームの勝者が受け取り済み。このゲームで払われた料金が次へ
   const from: Record<string, number> = {};
@@ -229,16 +267,41 @@ export function settleGame(m: MatchState): MatchState {
   next.carry = { amount: r.carryOut, from };
   next.gameNo++;
   next.game = null;
-  const act = active(next);
-  if (act.length < 3 || (next.config.maxGames !== null && next.gameNo > next.config.maxGames)) return endMatch(next);
+  if (shouldEnd(next)) return endMatch(next);
   return next;
+}
+
+function gameDetail(g: GameState, ids: string[]): GameDetail {
+  const r = g.result!;
+  const prov = g.provisional;
+  const ch = g.challenge;
+  const id = (i: number) => ids[i]!;
+  const boardCat = categoryOf(evaluate(r.board));
+  const winners = new Set(r.winners);
+  return {
+    firsts: (prov?.firsts ?? []).map(id),
+    lasts: (prov?.lasts ?? []).map(id),
+    declarers: (ch?.declarers ?? []).map(id),
+    forced: (ch?.forced ?? []).map(id),
+    joiners: (ch?.joiners ?? []).map(id),
+    category: Object.fromEntries(r.scores.map((s, i) => [id(i), categoryOf(s)])),
+    boardOnly: r.scores.map((s, i) => [s, i] as const).filter(([s]) => categoryOf(s) === boardCat).map(([, i]) => id(i)),
+    reversed: ch ? ch.forced.filter((i) => !winners.has(i)).map(id) : [],
+    nutLosers: r.nut ? g.seats.map((_, i) => i).filter((i) => !winners.has(i)).map(id) : [],
+    spent: Object.fromEntries(g.seats.map((s, i) => [id(i), paidExtras(s)])),
+  };
 }
 
 function endMatch(m: MatchState): MatchState {
   m.finished = true;
   m.game = null;
-  // 受け取る次のゲームがないので、持ち越しポットは払った人へ返す
-  if (m.carry && m.carry.amount > 0) {
+  const left = active(m);
+  if (left.length === 1 && m.carry && m.carry.amount > 0) {
+    // 残り 1 人で終わった: 持ち越しポットは残った人が全部受け取る（B-3。2026-11-10 決定）
+    left[0]!.chips += m.carry.amount;
+    m.carry = { amount: 0, from: {} };
+  } else if (m.carry && m.carry.amount > 0) {
+    // 受け取る次のゲームがないので、持ち越しポットは払った人へ返す
     for (const [id, v] of Object.entries(m.carry.from)) {
       const p = m.players.find((x) => x.id === id);
       if (p) p.chips += v;

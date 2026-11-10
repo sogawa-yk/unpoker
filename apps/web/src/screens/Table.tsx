@@ -5,6 +5,7 @@ import { handName, type Card as CardT, type GameView, type SeatView } from '@unp
 import { Card } from '../components/Card.tsx';
 import { Chips, ConnBadge, Gauge, signed, Toast } from '../components/bits.tsx';
 import { carryNext, potNow, provisionalRank, revealOdds, type HandOdds } from '../game.ts';
+import { OutlookGroups, outlookStage, SlotOdds } from '../components/Outlook.tsx';
 import { useRoom, type Room, type RoomView } from '../net.ts';
 import { RuleSettings, useJoinQr } from '../components/RoomSettings.tsx';
 import { Board, PauseButton, SoundButton, stampDelay, useChallengeBanner, useSwapAnimation, useTableSounds } from '../components/TableBits.tsx';
@@ -119,6 +120,7 @@ function Lobby({ room, s }: { room: Room; s: RoomView }) {
 // ---------------------------------------------------------------- 対局
 
 const SIDES: Record<number, ('bottom' | 'left' | 'top' | 'right')[]> = {
+  2: ['bottom', 'top'],
   3: ['bottom', 'left', 'right'],
   4: ['bottom', 'left', 'top', 'right'],
 };
@@ -128,6 +130,7 @@ function TableGame({ room, s, g }: { room: Room; s: RoomView; g: GameView }) {
   const sides = SIDES[g.seats.length] ?? SIDES[4]!;
   const swapDone = useSwapAnimation(g, s.gameNo);
   const nextCarry = carryNext(g);
+  const stage = outlookStage(g, swapDone);
   useTableSounds(s, g);
   // 公開フェーズの見込み: テーブルに見えている札（場札とめくれた札）だけから計算する
   const visibleKey = g.phase === 'reveal' ? JSON.stringify([g.board, g.seats.map((x) => x.cards)]) : '';
@@ -171,7 +174,10 @@ function TableGame({ room, s, g }: { room: Room; s: RoomView; g: GameView }) {
         ))}
         <div className="center">
           <Banner g={g} names={names} />
-          <Board g={g} swap={swapDone} />
+          <Board g={g} swap={swapDone} width={stage ? 76 : undefined} under={stage === 'before' && g.outlook ? (k) => <SlotOdds o={g.outlook!} k={k} name={(i) => names[i]!} /> : undefined} />
+          {(stage === 'after' || stage === 'answer') && g.outlook && (
+            <OutlookGroups o={g.outlook} name={(i) => names[i]!} added={g.challenge?.swap?.added ?? null} stage={stage} />
+          )}
           <div className="center-gauge">
             <Gauge room={room} />
           </div>

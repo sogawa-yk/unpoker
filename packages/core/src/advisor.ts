@@ -73,10 +73,11 @@ interface World {
   opps: Card[][];
 }
 
-function sampleWorlds(unseen: Card[], nUnknown: number, nOpp: number, count: number, rng: Rng): World[] {
+/** nHidden は伏せたランダムの場札の枚数（相手が出す札と同じく、見えていない札から引く） */
+function sampleWorlds(unseen: Card[], nUnknown: number, nOpp: number, count: number, rng: Rng, nHidden = 0): World[] {
   const worlds: World[] = [];
   const u = unseen.slice();
-  const need = nUnknown + nOpp * 7;
+  const need = nUnknown + nOpp * 7 + nHidden;
   for (let w = 0; w < count; w++) {
     // 必要な枚数だけ部分シャッフル
     for (let i = 0; i < need; i++) {
@@ -85,7 +86,7 @@ function sampleWorlds(unseen: Card[], nUnknown: number, nOpp: number, count: num
     }
     let p = 0;
     const own = u.slice(p, (p += nUnknown));
-    const oppBoard = u.slice(p, (p += nOpp));
+    const oppBoard = u.slice(p, (p += nOpp + nHidden));
     const opps: Card[][] = [];
     for (let o = 0; o < nOpp; o++) opps.push(u.slice(p, (p += 6)));
     worlds.push({ own, oppBoard, opps });
@@ -182,6 +183,8 @@ export interface PlacementInput {
   /** 場に出した札の位置（出す前は null） */
   boardIndex: number | null;
   initBoard: Card[];
+  /** 伏せたランダムの場札の枚数（B-8。既定 0） */
+  hiddenBoard?: number;
   players: number;
   /** 1 枚追加でめくった場合の見込みも出すか */
   withPeek: boolean;
@@ -208,8 +211,9 @@ export function advisePlacement(inp: PlacementInput, rng: Rng): PlacementAdvice 
     });
 
   const nUnknown = unknownIdx.length;
-  const worlds = sampleWorlds(unseenFor(), nUnknown, nOpp, S, rng);
-  const scoreWorlds = sampleWorlds(unseenFor(), nUnknown, nOpp, S * 2, rng);
+  const nHidden = inp.hiddenBoard ?? 0;
+  const worlds = sampleWorlds(unseenFor(), nUnknown, nOpp, S, rng, nHidden);
+  const scoreWorlds = sampleWorlds(unseenFor(), nUnknown, nOpp, S * 2, rng, nHidden);
   const choices = inp.boardIndex === null ? known.map((_, i) => i) : [inp.peeked.indexOf(inp.boardIndex)];
   const results = evaluateChoices(known, choices, worlds, scoreWorlds).sort((a, b) => b.win - a.win);
   const top = results[0]!;
@@ -229,8 +233,8 @@ export function advisePlacement(inp: PlacementInput, rng: Rng): PlacementAdvice 
     for (let t = 0; t < M; t++) {
       const c = pool[Math.floor(rng() * pool.length)]!;
       const k2 = [...known, c];
-      const w2 = sampleWorlds(unseenFor([c]), nUnknown - 1, nOpp, Math.round(S / 2), rng);
-      const v2 = sampleWorlds(unseenFor([c]), nUnknown - 1, nOpp, Math.round(S / 2), rng);
+      const w2 = sampleWorlds(unseenFor([c]), nUnknown - 1, nOpp, Math.round(S / 2), rng, nHidden);
+      const v2 = sampleWorlds(unseenFor([c]), nUnknown - 1, nOpp, Math.round(S / 2), rng, nHidden);
       const picks = k2.map((_, ci) => {
         const rest = k2.filter((_, j) => j !== ci);
         const m = chooseMatching(rest, k2[ci]!, inp.initBoard, w2);

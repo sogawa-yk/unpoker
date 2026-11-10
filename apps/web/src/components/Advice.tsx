@@ -2,7 +2,8 @@
 import type { AdviceRecord, AdviceTopic, ChallengeAdvice, ChallengeOption, GameView, PlacementAdvice, SeatView } from '@unpoker/core';
 import type { GameActionMsg } from '../../../server/src/protocol.ts';
 import { Card, cardName } from './Card.tsx';
-import { PaidButton, signed } from './bits.tsx';
+import { PaidButton } from './bits.tsx';
+import { tenTimes } from './Outlook.tsx';
 
 /** 今この席が相談できる判断（core の adviceTopic と同じ判定） */
 export function topicNow(g: GameView, me: SeatView): AdviceTopic | null {
@@ -59,7 +60,7 @@ export function AdvicePanel({
           <p className="advice-line">
             <span className="advice-tag">AI</span>
             <span>
-              枠に薄く出ている組み方がおすすめ。1 位の見込み <b>{pct(a.win)}</b>
+              枠に薄く出ている組み方がおすすめ。仮順位で 1 位になる見込み <b>{pct(a.win)}</b>
             </span>
           </p>
           <Explanation rec={rec} folded />
@@ -125,14 +126,14 @@ function PlacementAnswer({ a, me, g }: { a: PlacementAdvice; me: SeatView; g: Ga
           <span className="advice-tag">AI</span>
           {mini(a.boardIndex)}
           <span>
-            を場に出すのがおすすめ。1 位の見込み <b>{pct(a.win)}</b>
+            を場に出すのがおすすめ。仮順位で 1 位になる見込み <b>{pct(a.win)}</b>（{tenTimes(a.win)}）
           </span>
         </p>
       ) : (
         <p className="advice-line">
           <span className="advice-tag">AI</span>
           <span>
-            この組み方がおすすめ。1 位の見込み <b>{pct(a.win)}</b>
+            この組み方がおすすめ。仮順位で 1 位になる見込み <b>{pct(a.win)}</b>（{tenTimes(a.win)}）
           </span>
         </p>
       )}
@@ -163,55 +164,48 @@ function PlacementAnswer({ a, me, g }: { a: PlacementAdvice; me: SeatView; g: Ga
   );
 }
 
+/** 「平均すると 1 ゲームで何点得（損）」 */
+const gainText = (d: number) => {
+  const n = Math.round(d);
+  return n === 0 ? 'どちらでも平均はほぼ同じ' : `平均すると 1 ゲームで ${Math.abs(n).toLocaleString()} 点${n > 0 ? '得' : '損'}`;
+};
+
+/**
+ * チャレンジの相談の答え（rules.md「確率の書き方」）。
+ * 一番大きく出すのは「ほかに誰も乗らなかった場合」。ほかの場合は小さく添える
+ */
 function ChallengeAnswer({ a, name }: { a: ChallengeAdvice; name: (i: number) => string }) {
-  const yesLabel = a.topic === 'declare' ? 'チャレンジする' : '乗る';
-  const others = (xs: number[]) => (xs.length ? `${xs.map(name).join('・')} も乗る` : '誰も乗らない');
-  const row = (label: string, o: ChallengeOption, rec: boolean, showWin: boolean) => (
-    <div className={`advice-opt${rec ? ' rec' : ''}`}>
-      <span className="advice-opt-label">
-        {rec && <span className="advice-tag">AI</span>}
-        {label}
-      </span>
-      <span className="advice-opt-num">
-        {showWin && <>勝率 <b>{pct(o.win)}</b>・</>}期待 <b>{signed(Math.round(o.ev) || 0)}</b> 点
-      </span>
-    </div>
-  );
-  const showScen = (o: ChallengeOption) => o.scenarios.length > 1;
+  const declare = a.topic === 'declare';
+  const yesLabel = declare ? 'チャレンジする' : '乗る';
+  const alone = (o: ChallengeOption) => o.scenarios.find((x) => x.others.length === 0) ?? o.scenarios[0] ?? { others: [], win: o.win, ev: o.ev };
+  const y = alone(a.yes);
+  const n = alone(a.no);
+  const vs = declare ? '1 位の人とだけ戦った場合' : '宣言した人と 1 位の人とだけ戦った場合';
+  const others = a.yes.scenarios.filter((x) => x.others.length > 0);
+  const who = (xs: number[]) => xs.map(name).join('・');
   return (
     <>
-      {row(yesLabel, a.yes, a.recommend, true)}
-      {row('見送る', a.no, !a.recommend, a.topic === 'join')}
-      <p className="advice-sub">予想: {others(a.yes.predicted)}（他の人も期待収支で決めると仮定）</p>
-      {(showScen(a.yes) || showScen(a.no)) && (
-        <details className="advice-more">
-          <summary>他の人の判断ごとの内訳</summary>
-          <table>
-            <thead>
-              <tr>
-                <th>他の人</th>
-                <th>{yesLabel}</th>
-                <th>見送る</th>
-              </tr>
-            </thead>
-            <tbody>
-              {a.yes.scenarios.map((s, i) => {
-                const n = a.no.scenarios.find((x) => x.others.join() === s.others.join()) ?? a.no.scenarios[0]!;
-                return (
-                  <tr key={i}>
-                    <td>{others(s.others)}</td>
-                    <td>
-                      {pct(s.win)}・{signed(Math.round(s.ev) || 0)}
-                    </td>
-                    <td>{signed(Math.round(n.ev) || 0)}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </details>
+      <p className="advice-main">
+        <span className="advice-tag">AI</span>
+        {yesLabel}と、あなたが最後に 1 位になる見込み <b>{pct(y.win)}</b>
+        <small>
+          （{tenTimes(y.win)}。{vs}）
+        </small>
+      </p>
+      <p className="advice-line">
+        {yesLabel}ほうが、見送るより{gainText(y.ev - n.ev)}
+      </p>
+      {others.length > 0 && (
+        <p className="advice-sub">
+          {others.map((x) => `${who(x.others)} も乗ってきたら ${pct(x.win)}`).join('、')}
+        </p>
       )}
-      <p className="advice-foot">入れ替わる札の全パターンから計算しています。勝てるかは運次第</p>
+      <p className="advice-sub">
+        {a.yes.predicted.length
+          ? `AI の予想: ${who(a.yes.predicted)} も乗る。そのときは${a.recommend ? `${yesLabel}ほう` : '見送るほう'}が得（${gainText(Math.abs(a.yes.ev - a.no.ev))}）`
+          : 'AI の予想: ほかに誰も乗らない（上の数字のとおり）'}
+      </p>
+      <p className="advice-foot">入れ替わる札の全パターンから数えています。勝てるかは運次第</p>
     </>
   );
 }

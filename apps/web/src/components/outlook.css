@@ -1,0 +1,183 @@
+/* チャレンジ中の勝ち筋（B-9） */
+.seat-c0 {
+  --seat: #e8735a;
+}
+.seat-c1 {
+  --seat: #5cc2a8;
+}
+.seat-c2 {
+  --seat: #e3c15a;
+}
+.seat-c3 {
+  --seat: #8fa8f0;
+}
+
+.ol-who {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+}
+.ol-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.ol-name i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--seat, var(--hakuai));
+  flex: none;
+}
+
+/* ① 場札の下 */
+.slot-under {
+  margin-top: 6px;
+}
+.ol-slot {
+  display: grid;
+  gap: 1px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--hakuai);
+  min-width: 0;
+}
+.ol-slot-head {
+  font-size: 10px;
+  opacity: 0.8;
+  text-align: center;
+}
+.ol-slot-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+}
+.ol-slot-row b {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.ol-slot-row.top {
+  color: var(--text);
+}
+.ol-slot-row.top b {
+  color: var(--kin-hi);
+}
+
+/* ② 色分け */
+.ol-groups {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+}
+.ol-title {
+  margin: 0;
+  font-family: var(--mincho);
+  font-size: 16px;
+  color: var(--kinari);
+  text-align: center;
+}
+.ol-group {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: rgb(255 255 255 / 0.05);
+  border-left: 4px solid var(--seat, var(--hakuai));
+  transition:
+    opacity 0.4s,
+    box-shadow 0.4s;
+}
+.ol-group.tie {
+  --seat: var(--hakuai);
+}
+.ol-group.hit {
+  box-shadow: 0 0 0 2px var(--kin);
+  background: rgb(201 162 74 / 0.14);
+}
+.ol-group.miss {
+  opacity: 0.35;
+}
+.ol-group-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  font-size: 14px;
+  color: var(--text);
+}
+.ol-group-label small {
+  color: var(--hakuai);
+  font-size: 12px;
+}
+.ol-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  align-items: center;
+}
+.ol-chip {
+  font-size: 12px;
+  line-height: 1;
+  padding: 3px 4px;
+  border-radius: 3px;
+  background: var(--kinari);
+  color: var(--sumi);
+  font-variant-numeric: tabular-nums;
+}
+.ol-chip.red {
+  color: var(--shu);
+}
+.ol-chip.hit {
+  outline: 2px solid var(--kin-hi);
+  transform: scale(1.25);
+}
+.ol-phone .ol-group {
+  grid-template-columns: 1fr;
+}
+.ol-more {
+  font-size: 11px;
+  color: var(--hakuai);
+}
+
+/* スマホ */
+.ol-phone {
+  display: grid;
+  gap: 8px;
+}
+.ol-big {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.5;
+}
+.ol-big b {
+  font-size: 22px;
+  color: var(--kin-hi);
+  margin-left: 4px;
+}
+.ol-big small {
+  display: block;
+  color: var(--hakuai);
+  font-size: 12px;
+}
+.ol-phone-slots {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+}
+.ol-phone-slots .ol-slot {
+  font-size: 11px;
+}
+
+.ol-phone-slot {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  padding: 4px 2px;
+  border-radius: 8px;
+}
+.ol-phone-slot.lit {
+  box-shadow: 0 0 0 2px var(--kin);
+}

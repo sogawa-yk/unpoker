@@ -7,6 +7,9 @@ import { arrangeSets, chooseBoardIndex } from './strategy.ts';
 import { adviseChallenge, advisePlacement, type Advice, type ChallengeOutcome } from './advisor.ts';
 
 export const HAND_SIZE = 7;
+
+/** 人数ごとの、伏せたランダムの場札の枚数（B-8）。どの人数でも、表 1 枚と合わせて場札は 5 枚 */
+export const HIDDEN_BOARD: Record<number, number> = { 2: 2, 3: 1, 4: 0 };
 export const FREE_PEEKS = 3;
 
 /** 追加でめくる 1 枚の料金（rules.md B-5: 0.25B。端数は切り上げ） */
@@ -113,6 +116,8 @@ export interface GameState {
   dealer: number;
   seats: SeatState[];
   initialBoard: Card[];
+  /** 伏せたランダムの場札。場札公開で各自の札と一緒にめくる（B-8。古い保存データには無い） */
+  hiddenBoard?: Card[];
   board: Card[];
   deck: Card[];
   revealTurn: number;
@@ -160,7 +165,7 @@ export interface NewGameInput {
 
 export function newGame({ players, bet, dealer, carryIn = 0, extraPeeks = true }: NewGameInput, rng: Rng): GameState {
   const n = players.length;
-  if (n < 3 || n > 4) fail('参加人数は 3 人か 4 人');
+  if (n < 2 || n > 4) fail('参加人数は 2〜4 人');
   if (players.some((p) => p.chips <= 0)) fail('持ち点が 0 の参加者はゲームに入れない');
   const deck = shuffle(fullDeck(), rng);
   const seats: SeatState[] = players.map((p) => {
@@ -182,8 +187,11 @@ export function newGame({ players, bet, dealer, carryIn = 0, extraPeeks = true }
       join: null,
     };
   });
-  const initialBoard = deck.splice(0, n === 3 ? 2 : 1);
+  // 場札（B-8）: 最初から表の札 1 枚 ＋ 伏せたランダムの札（2 人は 2 枚、3 人は 1 枚）＋ 各自が出す札
+  const initialBoard = deck.splice(0, 1);
+  const hiddenBoard = deck.splice(0, HIDDEN_BOARD[n]!);
   return {
+    hiddenBoard,
     phase: 'placement',
     bet,
     dealer,
@@ -328,8 +336,8 @@ function validateSets(p: SeatState, sets: [number, number][]) {
 
 function afterPlacement(s: GameState): GameState {
   if (s.seats.some((p) => p.sets === null)) return s;
-  // 場札: 初期の場札 ＋ 各自が出した札（席番号順）
-  s.board = [...s.initialBoard, ...s.seats.map((p) => p.hand[p.boardIndex!]!)];
+  // 場札: 最初から表の札 ＋ 伏せたランダムの札 ＋ 各自が出した札（席番号順）
+  s.board = [...s.initialBoard, ...(s.hiddenBoard ?? []), ...s.seats.map((p) => p.hand[p.boardIndex!]!)];
   s.phase = 'boardReveal';
   return s;
 }
@@ -452,6 +460,7 @@ function consult(s: GameState, seat: number, rng: Rng): GameState {
         peeked: p.peeked,
         boardIndex: p.boardIndex,
         initBoard: s.initialBoard,
+        hiddenBoard: (s.hiddenBoard ?? []).length,
         players: s.seats.length,
         withPeek: s.extraPeeks && p.stack >= s.peekPrice,
       },

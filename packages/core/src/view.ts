@@ -1,5 +1,6 @@
 // 端末ごとに見てよい情報だけを取り出す（不正防止。architecture.md 3 章）
 import type { Card } from './cards.ts';
+import { challengeOutlook, type ChallengeOutlook } from './outlook.ts';
 import { advicePriceFor, type AdviceRecord, type AdviceTopic, type GameResult, type GameState, type Phase, type Provisional } from './game.ts';
 
 export type Viewer = { kind: 'table' } | { kind: 'seat'; seat: number };
@@ -41,7 +42,7 @@ export interface GameView {
   seats: SeatView[];
   /** 場札。伏せている札は null */
   board: (Card | null)[];
-  /** 場札を出した席（初期の場札は null） */
+  /** 場札を出した席（最初から表の札は null、伏せたランダムの札は -1） */
   boardOwners: (number | null)[];
   deckCount: number;
   revealTurn: number;
@@ -53,6 +54,8 @@ export interface GameView {
   /** 追加めくりと AI 相談ができるか（規定数の最終ゲームではできない） */
   extraPeeks: boolean;
   advicePrice: { placement: number; challenge: number };
+  /** チャレンジ中の勝ち筋（B-9）。参加者が決まった後（入れ替えの場面）だけ。判断の場面には送らない */
+  outlook: ChallengeOutlook | null;
 }
 
 const AFTER_REVEAL: Phase[] = ['ranking', 'declare', 'join', 'swap', 'result'];
@@ -96,16 +99,23 @@ export function viewFor(s: GameState, viewer: Viewer): GameView {
 
   const board: (Card | null)[] = [...s.initialBoard];
   const boardOwners: (number | null)[] = s.initialBoard.map(() => null);
+  const hidden = s.hiddenBoard ?? [];
   if (placementDone) {
+    const head = s.initialBoard.length + hidden.length;
     s.board.forEach((c, k) => {
       if (k >= s.initialBoard.length) {
         board.push(c);
-        boardOwners.push(k - s.initialBoard.length);
+        boardOwners.push(k < head ? -1 : k - head);
       }
     });
     // 入れ替え後は現在の場札をそのまま見せる
     if (s.challenge?.swap) for (let k = 0; k < board.length; k++) board[k] = s.board[k]!;
   } else {
+    // 配置中: 伏せたランダムの札は誰にも見せない
+    hidden.forEach(() => {
+      board.push(null);
+      boardOwners.push(-1);
+    });
     s.seats.forEach((p, i) => {
       if (p.boardIndex !== null) {
         board.push(i === you ? p.hand[p.boardIndex]! : null);
@@ -131,5 +141,6 @@ export function viewFor(s: GameState, viewer: Viewer): GameView {
     peekPrice: s.peekPrice,
     extraPeeks: s.extraPeeks,
     advicePrice: advicePriceFor(s.bet),
+    outlook: challengeOutlook(s),
   };
 }

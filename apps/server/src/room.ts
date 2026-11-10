@@ -3,6 +3,7 @@ import {
   betOptions,
   DEFAULT_CONFIG,
   GameError,
+  matchStats,
   pendingSeats,
   reduceMatch,
   RULES_VERSION,
@@ -12,6 +13,7 @@ import {
   type MatchConfig,
   type MatchOp,
   type MatchState,
+  type PlayerStats,
   type Rng,
 } from '@unpoker/core';
 import type { GameActionMsg, RoomStatus, RoomView, ServerMsg } from './protocol.ts';
@@ -117,6 +119,8 @@ export interface RoomData {
   matchNo?: number;
   /** 今の対局の記録（古い保存データには無い。無ければ記録しない） */
   rec?: RoomRecord | null;
+  /** 前の対局の成績（同じメンバーで次の対局を始めたとき。特殊効果カードを配る条件に使う） */
+  prevStats?: { matchNo: number; stats: PlayerStats[] } | null;
 }
 
 export interface Conn {
@@ -252,7 +256,7 @@ export class Room {
 
   start() {
     if (this.data.status !== 'lobby') throw new RoomError('すでに始まっている');
-    if (this.data.players.length < 3) throw new RoomError('3 人以上そろってから始める');
+    if (this.data.players.length < 2) throw new RoomError('2 人以上そろってから始める');
     const now = this.deps.now();
     this.data.matchNo = (this.data.matchNo ?? 0) + 1;
     this.data.rec = { matchId: `${this.id}-${this.data.matchNo}`, seed: newSeed(), eventNo: 0, startedAt: now, dealtGames: [], finishedGames: [] };
@@ -268,6 +272,24 @@ export class Room {
     if (this.data.status !== 'playing' || !m?.game || m.game.phase !== 'result') throw new RoomError('結果が出てから次へ進む');
     this.exec({ op: 'next' }, 'table');
     if (this.data.match!.finished) this.data.status = 'finished';
+    this.commit();
+  }
+
+  /**
+   * 同じメンバーで次の対局へ（対局が終わった後）。ルームとトークンはそのまま、待機中に戻す。
+   * 前の対局の成績を残す（特殊効果カードの配布に使う）。待機中に参加者を外したり、加えたりできる
+   */
+  rematch() {
+    if (this.data.status !== 'finished' || !this.data.match) throw new RoomError('対局が終わってから次の対局へ進む');
+    this.data.prevStats = { matchNo: this.data.matchNo ?? 1, stats: matchStats(this.data.match) };
+    this.data.status = 'lobby';
+    this.data.match = null;
+    this.data.rec = null;
+    this.data.deadline = null;
+    this.data.phaseKey = null;
+    this.data.paused = false;
+    this.data.pausedRemain = null;
+    this.rouletteQueue = [];
     this.commit();
   }
 
@@ -453,6 +475,7 @@ export class Room {
       carryIn: g.carryIn,
       hands: g.seats.map((x) => [...x.hand]),
       initialBoard: [...g.initialBoard],
+      hiddenBoard: [...(g.hiddenBoard ?? [])],
       deck: sw ? [sw.added, ...g.deck] : [...g.deck],
       result: res
         ? {
@@ -515,7 +538,7 @@ export class Room {
       if (r === 'ready') this.data.rouletteGate = Math.max(now, (this.data.joinAt ?? 0) + t.challengeBanner) + t.swapIntro;
       else if (r === 'spinning') this.data.rouletteGate = now + t.minSpin;
     }
-    const hidden = g.seats.length; // 各自が出した伏せ札の枚数
+    const hidden = 5 - g.initialBoard.length; // 場札公開でめくる伏せ札の枚数（各自の札と、伏せたランダムの札）
     const [ms, isTimeout] = ((): [number, boolean] => {
       switch (g.phase) {
         case 'placement':
@@ -643,6 +666,7 @@ export class Room {
       hostId: d.hostId ?? null,
       you: conn.role === 'player' && conn.playerId ? { role: 'player', playerId: conn.playerId } : { role: 'table' },
       gameNo: m?.gameNo ?? 0,
+      matchNo: d.status === 'lobby' ? (d.matchNo ?? 0) + 1 : (d.matchNo ?? 1),
       dealerId: m?.dealerId ?? null,
       history: m?.history ?? [],
       ranking: m?.ranking ?? null,

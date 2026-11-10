@@ -44,6 +44,8 @@ export interface GameRow {
   /** 配った直後の札（ルールやコードが変わっても、配った札は確実に再現できるように） */
   hands: Card[][];
   initialBoard: Card[];
+  /** 伏せたランダムの場札（B-8） */
+  hiddenBoard: Card[];
   deck: Card[];
   /** 結果（終わったら入る） */
   result: (Omit<GameRecord, 'gameNo' | 'seatIds'> & { scores: number[]; board: Card[] }) | null;

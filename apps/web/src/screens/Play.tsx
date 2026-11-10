@@ -4,10 +4,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { arrangeSets, chooseBoardIndex, handName, type Card as CardT, type GameView, type SeatView } from '@unpoker/core';
 import type { GameActionMsg } from '../../../server/src/protocol.ts';
 import { Card, cardName } from '../components/Card.tsx';
-import { AdvicePanel, adviceNow, arrangePlan } from '../components/Advice.tsx';
+import { AdvicePanel, adviceNow, arrangePlan, topicNow } from '../components/Advice.tsx';
 import { Chips, ConnBadge, Gauge, HoldButton, PaidButton, StackChips, signed, Toast } from '../components/bits.tsx';
 import { carryNext, challengeHands, potNow, provisionalRank, shownBoard, type ChallengeRole } from '../game.ts';
 import { useSwapAnimation } from '../components/TableBits.tsx';
+import { outlookStage, PhoneOutlook } from '../components/Outlook.tsx';
 import { savedToken, useRoom, type Room, type RoomView } from '../net.ts';
 import { FinalList, HostControls, HostLobby, NextGame, SwapBoard, TableStrip, TablelessCtx, tablelessOf, useTableless } from './PlayTable.tsx';
 import { sfx } from '../sound.ts';
@@ -21,7 +22,7 @@ export function PlayScreen({ roomId }: { roomId: string }) {
     if (autoName) send({ t: 'join', roomId, name: autoName });
   });
   const s = room.state;
-  useBot(room, params.get('bot') === '1', params.get('mash') === '1');
+  useBot(room, params.get('bot') === '1', params.get('mash') === '1', params.get('consult') === '1');
   const hasToken = savedToken(roomId, 'player') !== null;
   const notFound = room.error?.code === 'room_not_found';
   return (
@@ -326,7 +327,7 @@ function Placement({ g, me, act, name }: { g: GameView; me: SeatView; act: (a: G
           追加で {extra} 枚めくりました（{extra * price} 点）。めくった枚数は{tableless.on ? 'ほかの人のスマホ' : ' iPad '}に出ます
         </p>
       )}
-      {boardKnown.length > 0 && <MiniBoard cards={boardKnown} label="場札" />}
+      {boardKnown.length > 0 && <MiniBoard cards={boardKnown} hidden={g.boardOwners.filter((o) => o === -1).length} label="場札" />}
       <div className="hand7">
         {ALL.map((k) => {
           const known = me.known.includes(k);
@@ -588,9 +589,10 @@ function AfterPlacement({
           </div>
           {tableless.on && g.phase === 'swap' ? (
             <SwapBoard s={s} g={g} />
-          ) : (
+          ) : outlookStage(g, swapAnim) === 'before' ? null : (
             <MiniBoard cards={board} label={g.phase === 'swap' && swapAnim.revealNew ? '入れ替え後の場札' : '場札'} />
           )}
+          <PhoneOutlook g={g} swap={swapAnim} name={name} board={board} showCards={!tableless.on} />
           {(g.phase === 'join' || g.phase === 'swap') && g.challenge && <ChallengeHands g={g} board={board} name={name} />}
           <SetsView me={me} compact best={prov!.bestSet[you]} />
           {g.phase === 'declare' && lastMe && !me.declareDone && (
@@ -769,11 +771,15 @@ function Instruction({ main, sub }: { main: string; sub?: string }) {
   );
 }
 
-function MiniBoard({ cards, label }: { cards: CardT[]; label: string }) {
+/** 場札の小さな表示。hidden は伏せたランダムの場札の枚数（配置中は裏向きで並べる） */
+function MiniBoard({ cards, label, hidden = 0 }: { cards: CardT[]; label: string; hidden?: number }) {
   return (
     <div className="miniboard" aria-label={label}>
       {cards.map((c, i) => (
         <Card key={`${i}:${c}`} card={c} faceUp width={44} />
+      ))}
+      {Array.from({ length: hidden }, (_, i) => (
+        <Card key={`h${i}`} card={null} faceUp={false} width={44} label="伏せたランダムの場札" />
       ))}
     </div>
   );
@@ -784,7 +790,7 @@ function MySets({ g, me, hint, showBoard }: { g: GameView; me: SeatView; hint: s
   return (
     <>
       <Instruction main={hint} />
-      {(showBoard || board.length > 0) && <MiniBoard cards={board} label="場札" />}
+      {(showBoard || board.length > 0) && <MiniBoard cards={board} hidden={g.phase === 'placement' ? g.boardOwners.filter((o) => o === -1).length : 0} label="場札" />}
       <SetsView me={me} />
     </>
   );
@@ -822,7 +828,7 @@ function SetsView({ me, onFlip, compact, best }: { me: SeatView; onFlip?: (k: nu
 
 
 /** 開発用のボット: 状態を見て、少し間を置いて合法手を 1 つ送る */
-function useBot(room: Room, on: boolean, mash = false) {
+function useBot(room: Room, on: boolean, mash = false, consult = false) {
   const g = room.state?.game;
   const key = room.state ? `${room.state.serverTime}` : '';
   useEffect(() => {
@@ -849,6 +855,9 @@ function useBot(room: Room, on: boolean, mash = false) {
     } else if (g.phase === 'reveal' && g.revealTurn === g.you) {
       const left = ALL.filter((k) => k !== me.boardIndex && !me.revealed.includes(k));
       a = { type: 'flip', index: left[Math.floor(Math.random() * left.length)]! };
+    } else if (consult && (g.phase === 'declare' || g.phase === 'join') && g.extraPeeks && topicNow(g, me) && !adviceNow(g, me) && me.stack > g.advicePrice.challenge) {
+      // 開発用: チャレンジの判断の前に AI に相談し、答えを見てから（数秒後に）決める
+      a = { type: 'consult' };
     } else if (g.phase === 'declare' && g.provisional?.lasts.includes(g.you) && !me.declareDone) {
       a = { type: 'declare', yes: me.stack > 0 && Math.random() < 0.6 };
     } else if (g.phase === 'join' && g.challenge?.optional.includes(g.you) && !me.joinDone) {
@@ -868,7 +877,8 @@ function useBot(room: Room, on: boolean, mash = false) {
     }
     if (!a) return;
     const action = a;
-    const t = setTimeout(() => room.send({ t: 'action', action }), 700 + Math.random() * 900);
+    const wait = consult && (action.type === 'declare' || action.type === 'join') ? 4000 : 700 + Math.random() * 900;
+    const t = setTimeout(() => room.send({ t: 'action', action }), wait);
     return () => clearTimeout(t);
   }, [key, on]); // eslint-disable-line react-hooks/exhaustive-deps
 }

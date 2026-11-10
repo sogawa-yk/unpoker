@@ -27,6 +27,7 @@ export const ConfigMsg = z.object({
   maxBet: z.number().int().nullable().optional(),
   betStep: z.number().int().optional(),
   timeLimit: z.boolean().optional(),
+  headsUp: z.boolean().optional(),
 });
 
 const roomId = z.string().regex(/^[A-Z2-9]{6}$/);
@@ -49,6 +50,8 @@ export const ClientMsg = z.discriminatedUnion('t', [
   z.object({ t: z.literal('kick'), playerId: z.string() }),
   /** 対局開始（テーブルか親機） */
   z.object({ t: z.literal('start') }),
+  /** 対局が終わった後、同じメンバーで次の対局へ（テーブルか親機） */
+  z.object({ t: z.literal('rematch') }),
   /** 結果確認の後、次のゲームへ（テーブルか親機） */
   z.object({ t: z.literal('nextGame') }),
   /** 持ち時間を止める・再開する（テーブルか親機、対局中） */
@@ -82,6 +85,8 @@ export interface RoomView {
   hostId: string | null;
   you: { role: 'table' } | { role: 'player'; playerId: string };
   gameNo: number;
+  /** このルームで何番目の対局か（待機中は、これから始める対局の番号） */
+  matchNo: number;
   dealerId: string | null;
   history: GameRecord[];
   ranking: string[] | null;

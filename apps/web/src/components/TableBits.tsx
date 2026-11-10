@@ -1,6 +1,6 @@
 // テーブルの演出の部品。テーブル（iPad）と、テーブルなしで遊ぶときのスマホで使う
 import { motion } from 'motion/react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Card as CardT, GameView } from '@unpoker/core';
 import { Card } from './Card.tsx';
 import { rouletteSchedule, ROULETTE_SPIN_MS } from '../game.ts';
@@ -77,7 +77,8 @@ export function stampDelay(g: GameView, seat: number): number {
 
 export const BOARD_W = 92;
 
-export function Board({ g, swap, width = BOARD_W }: { g: GameView; swap: SwapAnim; width?: number }) {
+/** under: 札の下に添える表示（チャレンジ中の勝ち筋など） */
+export function Board({ g, swap, width = BOARD_W, under }: { g: GameView; swap: SwapAnim; width?: number; under?: (k: number) => ReactNode }) {
   const initialCount = g.boardOwners.filter((o) => o === null).length;
   const slots = 5;
   return (
@@ -115,6 +116,7 @@ export function Board({ g, swap, width = BOARD_W }: { g: GameView; swap: SwapAni
               <div className="card-slot" style={{ ['--card-w' as string]: `${width}px` }} />
             )}
             {g.phase === 'swap' && swap.highlight === k && <motion.div layoutId="roulette" className="roulette" transition={{ duration: 0.08 }} />}
+            {under && <div className="slot-under">{under(k)}</div>}
           </div>
         );
       })}

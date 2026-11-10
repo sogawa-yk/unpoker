@@ -60,7 +60,7 @@ export function buildPrompt(s: GameState, seat: number, rec: AdviceRecord, names
       .join(' ／ ');
     const lines = [
       `場面: 配置フェーズ（${pa.topic === 'place' ? '場に出す札を選ぶ' : '組み方を決める'}）。${s.seats.length} 人で対戦。`,
-      `初期の場札: ${cards(s.initialBoard)}`,
+      `最初から表の場札: ${cards(s.initialBoard)}${(s.hiddenBoard ?? []).length ? `（ほかに伏せたランダムの場札が ${s.hiddenBoard!.length} 枚。中身は誰も知らない）` : ''}`,
       `自分がめくって中身を知っている札: ${cards(known)}`,
       ...(pa.topic === 'place' ? pa.candidates.map((c) => c.index) : [pa.boardIndex]).map((bi) => {
         const b = p.hand[bi]!;

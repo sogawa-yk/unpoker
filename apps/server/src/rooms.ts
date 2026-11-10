@@ -167,6 +167,8 @@ export class Rooms {
         return this.requireHost(conn).start();
       case 'nextGame':
         return this.requireHost(conn).nextGame();
+      case 'rematch':
+        return this.requireHost(conn).rematch();
       case 'pause': {
         const r = this.requireHost(conn);
         return msg.paused ? r.pause() : r.unpause();

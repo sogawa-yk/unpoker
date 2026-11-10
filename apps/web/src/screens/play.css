@@ -330,9 +330,26 @@
   color: var(--kin-hi);
   font-variant-numeric: tabular-nums;
 }
+.advice-main {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.5;
+}
+.advice-main b {
+  font-size: 22px;
+  color: var(--kin-hi);
+  margin-left: 4px;
+}
+.advice-main small,
+.advice-line small {
+  display: block;
+  font-size: 12px;
+  color: var(--hakuai);
+}
 .advice-line {
   margin: 0;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }

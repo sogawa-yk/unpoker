@@ -85,6 +85,25 @@ test('ボット 4 人で 2 ゲーム遊び、最終結果まで進む（固定�
   expect([table, ...phones].flatMap((d) => d.errors)).toEqual([]);
 });
 
+test('2 人で遊べる: 伏せたランダムの場札 2 枚が場札公開でめくれ、最終結果まで進む', async ({ browser }) => {
+  const table = await openTable(browser);
+  const names = ['あかり', 'ひなた'];
+  const phones = await Promise.all(names.map((n) => bot(browser, table.roomId, n)));
+  for (const n of names) await expect(table.page.locator('body')).toContainText(n);
+  await setGames(table.page, 2);
+  await table.page.getByRole('button', { name: '2 人で対局を始める' }).click();
+  // 配置中: 表の場札 1 枚と、伏せたランダムの場札 2 枚（ボットが出した札が加わるので 3 枚以上）
+  await expect(table.page.locator('[data-phase="placement"]')).toBeVisible();
+  expect(await table.page.locator('.board .board-slot .card').count()).toBeGreaterThanOrEqual(3);
+  // 公開フェーズでは場札が 5 枚そろっている
+  await expect(table.page.locator('[data-phase="reveal"]')).toBeVisible({ timeout: 60_000 });
+  await expect(table.page.locator('.board .board-slot .card')).toHaveCount(5);
+  const seen = await playToEnd(table.page, 2);
+  for (const p of ['placement', 'boardReveal', 'reveal', 'result']) expect(seen, `通ったフェーズ: ${[...seen].join(', ')}`).toContain(p);
+  await expect(table.page.locator('.final-list li')).toHaveCount(2);
+  expect([table, ...phones].flatMap((d) => d.errors)).toEqual([]);
+});
+
 test('持ち回りベットと持ち時間なしで、親がベットを決めてゲームが始まる', async ({ browser }) => {
   const table = await openTable(browser);
   const names = ['あおい', 'けんた', 'ゆな'];
@@ -118,9 +137,10 @@ test('人がコードを入れて参加し、途中で読み込み直しても�
   await expect(human.page.getByText('ゆき さん、ようこそ')).toBeVisible();
   await expect(table.page.locator('body')).toContainText('ゆき');
 
-  // 3 人目までは始められない
-  const others = [await bot(browser, table.roomId, 'はるか')];
+  // 1 人では始められない（2 人から遊べる）
   await expect(table.page.getByRole('button', { name: 'あと 1 人で始められます' })).toBeDisabled();
+  const others = [await bot(browser, table.roomId, 'はるか')];
+  await expect(table.page.getByRole('button', { name: '2 人で対局を始める' })).toBeEnabled();
   others.push(await bot(browser, table.roomId, 'そうた'));
   await table.page.getByRole('button', { name: '3 人で対局を始める' }).click();
   await expect(table.page.locator('[data-phase="placement"]')).toBeVisible();

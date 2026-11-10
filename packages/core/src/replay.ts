@@ -6,7 +6,7 @@ import { apply, GameError, type GameAction } from './game.ts';
 import { chooseBet, createMatch, settleGame, startGame, type MatchConfig, type MatchState } from './match.ts';
 
 /** ルールの版。遊び方が変わったら上げる（記録にこの版を残し、分析のときに版ごとに分ける） */
-export const RULES_VERSION = '2026-11-10.1';
+export const RULES_VERSION = '2026-11-10.2'; // .2: 場札の構成（B-8）と 2 人プレイ
 
 export type MatchOp =
   /** 対局を作る（参加者と設定が決まった時点） */
