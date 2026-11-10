@@ -180,3 +180,59 @@ test('iPad なし: スマホがテーブルを作って親機になり、最終�
   for (const d of [host, ...phones]) await expect(d.page.locator('.final-mini li')).toHaveCount(4);
   expect([host, ...phones].flatMap((d) => d.errors)).toEqual([]);
 });
+
+test('スマホが裏に回って戻ると、つなぎ直して前のゲームの画面を残さない', async ({ browser }) => {
+  const table = await openTable(browser);
+  const others = await Promise.all(['はるか', 'そうた'].map((n) => bot(browser, table.roomId, n)));
+  // 調べるスマホ: 接続を横取りして、「つながっているのに何も届かない」状態（iOS が裏で通信を止めた後）を作れるようにする
+  const { defaultBrowserType: _, ...opts } = PHONE;
+  const ctx = await browser.newContext(opts);
+  opened.push(ctx);
+  const phone = await ctx.newPage();
+  const errors: string[] = [];
+  phone.on('pageerror', (e) => errors.push(e.message));
+  await phone.addInitScript(() => {
+    const w = window as unknown as { __last?: WebSocket; __mute?: WebSocket; __hidden?: boolean };
+    const Native = window.WebSocket;
+    window.WebSocket = class extends Native {
+      constructor(url: string | URL, p?: string | string[]) {
+        super(url, p);
+        w.__last = this;
+      }
+      set onmessage(h: ((ev: MessageEvent) => void) | null) {
+        super.onmessage = h && ((ev: MessageEvent) => (w.__mute === this ? undefined : h.call(this, ev)));
+      }
+      get onmessage() {
+        return super.onmessage;
+      }
+    } as typeof WebSocket;
+    Object.defineProperty(document, 'visibilityState', { get: () => (w.__hidden ? 'hidden' : 'visible') });
+  });
+  await phone.goto(`/play/${table.roomId}?name=${encodeURIComponent('ゆき')}&bot=1`);
+  await setGames(table.page, 2);
+  await table.page.getByRole('button', { name: '3 人で対局を始める' }).click();
+
+  // 1 ゲーム目の結果が出たところで裏に回る（届かなくなる）
+  await expect(phone.locator('.ply-delta')).toBeVisible({ timeout: 150_000 });
+  await phone.evaluate(() => {
+    const w = window as unknown as { __last?: WebSocket; __mute?: WebSocket; __hidden?: boolean };
+    w.__mute = w.__last;
+    w.__hidden = true;
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await table.page.getByRole('button', { name: '次のゲームへ' }).click();
+  await expect(table.page.locator('[data-phase="placement"]')).toBeVisible();
+  await phone.waitForTimeout(2_000);
+  // 届いていないので、まだ前のゲームの結果の画面のまま
+  await expect(phone.locator('.ply-delta')).toBeVisible();
+
+  // 戻ってくると、つなぎ直して 2 ゲーム目の画面になる（前の結果は残らない）
+  await phone.evaluate(() => {
+    (window as unknown as { __hidden?: boolean }).__hidden = false;
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await expect(phone.locator('.ply-delta')).toHaveCount(0);
+  await expect(phone.locator('.stale-cover')).toHaveCount(0);
+  await expect(phone.locator('.pg-main')).toBeVisible();
+  expect([table, ...others].flatMap((d) => d.errors).concat(errors)).toEqual([]);
+});

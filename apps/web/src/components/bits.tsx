@@ -99,6 +99,13 @@ export function Toast({ room }: { room: Room }) {
 }
 
 export function ConnBadge({ room }: { room: Room }) {
+  // 裏から戻った直後は、前のゲームの画面が残っているかもしれないので、最新の状態が届くまで隠す
+  if (room.stale && room.state)
+    return (
+      <div className="stale-cover" role="status" aria-live="polite">
+        <p>最新の状態を受け取っています…</p>
+      </div>
+    );
   if (room.status === 'open') return null;
   return <div className="conn">{room.status === 'connecting' ? '接続中…' : '再接続しています…'}</div>;
 }
