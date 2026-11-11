@@ -13,7 +13,8 @@
     "dev:web": "npm run dev -w @unpoker/web",
     "build": "npm run build -w @unpoker/web && npm run build -w @unpoker/server",
     "start": "node apps/server/dist/index.js",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "bots": "tsx apps/server/scripts/bots.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.55.1",
