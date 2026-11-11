@@ -571,7 +571,8 @@ describe('サーバー', () => {
     table.send({ t: 'start' });
     await playUntilResult(table, players, 1);
     const deals = table.state!.special!.deals;
-    expect(deals.length).toBeGreaterThanOrEqual(1);
+    // 引いた条件に誰も当てはまらなければ配らない（0〜3 枚）
+    expect(deals.length).toBeLessThanOrEqual(3);
     for (const d of deals) expect(d.candidates).toContain(d.recipient);
     expect(table.state!.special!.mine).toBeNull();
     expect(JSON.stringify(table.states)).not.toContain('"condition"');

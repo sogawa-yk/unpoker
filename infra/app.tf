@@ -31,10 +31,9 @@ resource "oci_nosql_table" "rooms" {
 }
 
 # 対局の記録（分析用。architecture.md「追加: 対局の記録」）。TTL なしで残す
+# オンデマンドのテーブルはテナンシーで 3 つまで（rooms と合わせて 3 つ）。対局とプレイヤーの行は games に入れる
 resource "oci_nosql_table" "records" {
   for_each = {
-    players     = "CREATE TABLE ${var.name}_players (deviceId STRING, data JSON, PRIMARY KEY(deviceId))"
-    matches     = "CREATE TABLE ${var.name}_matches (matchId STRING, data JSON, PRIMARY KEY(matchId))"
     games       = "CREATE TABLE ${var.name}_games (matchId STRING, gameNo INTEGER, data JSON, PRIMARY KEY(SHARD(matchId), gameNo))"
     game_events = "CREATE TABLE ${var.name}_game_events (matchId STRING, eventNo INTEGER, data JSON, PRIMARY KEY(SHARD(matchId), eventNo))"
   }
@@ -70,7 +69,7 @@ resource "oci_container_instances_container_instance" "app" {
       NOSQL_REGION      = var.region
       NOSQL_COMPARTMENT = var.compartment_ocid
       NOSQL_AUTH        = "resource_principal"
-      # 対局の記録（テーブル名の頭。<prefix>_players など）
+      # 対局の記録（テーブル名の頭。<prefix>_games と <prefix>_game_events）
       RECORDS              = "nosql"
       NOSQL_RECORDS_PREFIX = var.name
       APP_VERSION          = var.image_tag
@@ -85,5 +84,6 @@ resource "oci_container_instances_container_instance" "app" {
     private_ip            = var.app_private_ip
     is_public_ip_assigned = false
   }
-  depends_on = [oci_artifacts_container_repository.server, oci_nosql_table.records]
+  # 記録のテーブルが作れなくても（NoSQL のテーブル数の上限など）、アプリは止めない
+  depends_on = [oci_artifacts_container_repository.server]
 }
