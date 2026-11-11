@@ -125,8 +125,6 @@ export class FileRecordStore implements RecordStore {
 
 /**
  * 本番用: OCI NoSQL Database。テーブルは Terraform で作る（TTL なし）
- *   <prefix>_players (deviceId STRING, data JSON, PRIMARY KEY(deviceId))
- *   <prefix>_matches (matchId STRING, data JSON, PRIMARY KEY(matchId))
  *   <prefix>_games (matchId STRING, gameNo INTEGER, data JSON, PRIMARY KEY(SHARD(matchId), gameNo))
  *   <prefix>_game_events (matchId STRING, eventNo INTEGER, data JSON, PRIMARY KEY(SHARD(matchId), eventNo))
  * 説明文などのメモは game_events に eventNo を負の数（-1 から下へ）で入れる
@@ -151,8 +149,10 @@ export class NoSqlRecordStore implements RecordStore {
     const c = await this.client;
     await c.put(`${this.opts.prefix}_${table}`, row);
   }
-  putPlayer = (p: PlayerRow) => this.put('players', { deviceId: p.deviceId, data: p });
-  putMatch = (m: MatchRow) => this.put('matches', { matchId: m.matchId, data: m });
+  // オンデマンドのテーブルはテナンシーで 3 つまで（rooms、games、game_events で使い切る）。
+  // 対局の行は games の gameNo 0 に、プレイヤーの行は matchId を「player:<端末の ID>」にして games に入れる
+  putPlayer = (p: PlayerRow) => this.put('games', { matchId: `player:${p.deviceId}`, gameNo: 0, data: { kind: 'player', ...p } });
+  putMatch = (m: MatchRow) => this.put('games', { matchId: m.matchId, gameNo: 0, data: { kind: 'match', ...m } });
   putGame = (g: GameRow) => this.put('games', { matchId: g.matchId, gameNo: g.gameNo, data: g });
   putEvent = (e: EventRow) => this.put('game_events', { matchId: e.matchId, eventNo: e.eventNo, data: e });
   putNote = (n: NoteRow) => {
