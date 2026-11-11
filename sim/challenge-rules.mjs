@@ -22,7 +22,7 @@ const label = (g, i) => {
 const pct = (x) => (x * 100).toFixed(1) + '%';
 const sgn = (x) => (x >= 0 ? '+' : '') + x.toFixed(2);
 
-for (const n of [3, 4]) {
+for (const n of (process.env.PLAYERS ?? '2,3,4').split(',').map(Number)) {
   const games = [];
   for (let k = 0; k < N; k++) games.push(analyzeGame(n));
   console.log(`\n========== ${n} 人プレイ（${N} ゲーム） ==========`);

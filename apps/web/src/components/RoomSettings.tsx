@@ -81,21 +81,49 @@ export function RuleSettings({ room, s }: { room: Room; s: RoomView }) {
       />
       <Stepper
         label="ゲーム数"
-        value={c.maxGames ?? 0}
+        value={c.maxGames ?? 10}
         step={1}
         big={5}
-        min={0}
+        min={1}
         max={50}
-        format={(v) => (v === 0 ? '無制限' : `${v} ゲーム`)}
-        onChange={(v) => set({ maxGames: v === 0 ? null : v })}
+        format={(v) => `${v} ゲーム`}
+        onChange={(v) => set({ maxGames: v })}
+      />
+      <Segmented
+        label="前払い"
+        value={c.prepaid === false ? 'off' : 'on'}
+        options={[
+          ['on', 'あり'],
+          ['off', 'なし'],
+        ]}
+        onChange={(v) => set({ prepaid: v === 'on' })}
+      />
+      <Segmented
+        label="特殊カード"
+        value={c.specialCards ? 'on' : 'off'}
+        options={[
+          ['off', 'なし'],
+          ['on', 'あり'],
+        ]}
+        onChange={(v) => set({ specialCards: v === 'on' })}
+      />
+      <Segmented
+        label="残り 2 人"
+        value={c.headsUp ? 'on' : 'off'}
+        options={[
+          ['off', '終える'],
+          ['on', '続ける'],
+        ]}
+        onChange={(v) => set({ headsUp: v === 'on' })}
       />
     </div>
-    <button className="btn btn-shu btn-wide start" disabled={n < 3} onClick={() => room.send({ t: 'start' })}>
-      {n < 3 ? `あと ${3 - n} 人で始められます` : `${n} 人で対局を始める`}
+    <button className="btn btn-shu btn-wide start" disabled={n < 2} onClick={() => room.send({ t: 'start' })}>
+      {n < 2 ? `あと ${2 - n} 人で始められます` : `${n} 人で対局を始める`}
     </button>
-    {(rotating || c.timeLimit === false) && (
+    {(rotating || c.timeLimit === false || n >= 3) && (
       <p className="lobby-hint small">
         {[
+          n >= 3 && (c.headsUp ? 'ヘッズアップ: 残り 2 人になっても、どちらかの持ち点が 0 になるか規定のゲーム数まで続けます' : '残り 2 人になったら、その時点の持ち点で順位を決めて終えます'),
           rotating && `持ち回り: 親がゲームごとにスマホでベット額を決めます${c.timeLimit === false ? '' : '（30 秒で最低ベット）'}`,
           c.timeLimit === false && '持ち時間なし: 時間切れで進めず、全員の操作を待ちます',
         ]

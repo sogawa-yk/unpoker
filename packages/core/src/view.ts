@@ -1,5 +1,7 @@
 // 端末ごとに見てよい情報だけを取り出す（不正防止。architecture.md 3 章）
 import type { Card } from './cards.ts';
+import { challengeOutlook, type ChallengeOutlook } from './outlook.ts';
+import type { SpecialKind } from './special.ts';
 import { advicePriceFor, type AdviceRecord, type AdviceTopic, type GameResult, type GameState, type Phase, type Provisional } from './game.ts';
 
 export type Viewer = { kind: 'table' } | { kind: 'seat'; seat: number };
@@ -13,6 +15,8 @@ export interface SeatView {
   peekFee: number;
   /** AI 相談の料金の合計と、相談した判断（相談したことは全員に公開。B-6） */
   adviceFee: number;
+  /** 前払いクレジットの残り（前払い制でなければ null。全員に公開。B-11） */
+  credit: number | null;
   consulted: AdviceTopic[];
   /** 相談の中身（自分の席だけ。他人の席は空） */
   advice: AdviceRecord[];
@@ -41,7 +45,7 @@ export interface GameView {
   seats: SeatView[];
   /** 場札。伏せている札は null */
   board: (Card | null)[];
-  /** 場札を出した席（初期の場札は null） */
+  /** 場札を出した席（最初から表の札は null、伏せたランダムの札は -1） */
   boardOwners: (number | null)[];
   deckCount: number;
   revealTurn: number;
@@ -53,6 +57,23 @@ export interface GameView {
   /** 追加めくりと AI 相談ができるか（規定数の最終ゲームではできない） */
   extraPeeks: boolean;
   advicePrice: { placement: number; challenge: number };
+  /** チャレンジ中の勝ち筋（B-9）。参加者が決まった後（入れ替えの場面）だけ。判断の場面には送らない */
+  outlook: ChallengeOutlook | null;
+  /** 特殊効果カード（B-10）。使わない対局では null */
+  special: SpecialView | null;
+}
+
+export interface SpecialView {
+  /** 席ごとに、カードを持っているか（種類は伏せる） */
+  holding: boolean[];
+  /** 自分のカード（自分の席だけ） */
+  mine: SpecialKind | null;
+  /** 使われたカード（全員に公開） */
+  used: { seat: number; kind: SpecialKind }[];
+  /** 使用禁止を使った席 */
+  banned: number | null;
+  /** 札を渡している間: 向きと、各席が選び終えたか（選んだ札は伏せる） */
+  passing: { dir: 1 | -1; picked: boolean[]; myPick: number | null } | null;
 }
 
 const AFTER_REVEAL: Phase[] = ['ranking', 'declare', 'join', 'swap', 'result'];
@@ -68,6 +89,7 @@ export function viewFor(s: GameState, viewer: Viewer): GameView {
       allOpen ||
       p.revealed.includes(k) ||
       (mine && p.peeked.includes(k)) ||
+      (mine && (p.seen ?? []).includes(k)) ||
       (placementDone && k === p.boardIndex);
     const hideChoice = (phase: Phase) => s.phase === phase && !mine;
     return {
@@ -77,13 +99,14 @@ export function viewFor(s: GameState, viewer: Viewer): GameView {
       challengeFee: p.challengeFee,
       peekFee: p.peekFee ?? 0,
       adviceFee: p.adviceFee ?? 0,
+      credit: s.prepaid ? (p.credit ?? 0) : null,
       consulted: (p.advice ?? []).map((a) => a.topic),
       advice: mine ? (p.advice ?? []) : [],
       peekedCount: p.peeked.length,
       placed: p.boardIndex !== null,
       arranged: p.sets !== null,
       cards: p.hand.map((c, k) => (visible(k) ? c : null)),
-      known: mine ? [...p.peeked] : [],
+      known: mine ? [...new Set([...p.peeked, ...(p.seen ?? [])])] : [],
       boardIndex: mine || placementDone ? p.boardIndex : null,
       sets: p.sets,
       revealed: [...p.revealed],
@@ -96,16 +119,23 @@ export function viewFor(s: GameState, viewer: Viewer): GameView {
 
   const board: (Card | null)[] = [...s.initialBoard];
   const boardOwners: (number | null)[] = s.initialBoard.map(() => null);
+  const hidden = s.hiddenBoard ?? [];
   if (placementDone) {
+    const head = s.initialBoard.length + hidden.length;
     s.board.forEach((c, k) => {
       if (k >= s.initialBoard.length) {
         board.push(c);
-        boardOwners.push(k - s.initialBoard.length);
+        boardOwners.push(k < head ? -1 : k - head);
       }
     });
     // 入れ替え後は現在の場札をそのまま見せる
     if (s.challenge?.swap) for (let k = 0; k < board.length; k++) board[k] = s.board[k]!;
   } else {
+    // 配置中: 伏せたランダムの札は誰にも見せない
+    hidden.forEach(() => {
+      board.push(null);
+      boardOwners.push(-1);
+    });
     s.seats.forEach((p, i) => {
       if (p.boardIndex !== null) {
         board.push(i === you ? p.hand[p.boardIndex]! : null);
@@ -131,5 +161,17 @@ export function viewFor(s: GameState, viewer: Viewer): GameView {
     peekPrice: s.peekPrice,
     extraPeeks: s.extraPeeks,
     advicePrice: advicePriceFor(s.bet),
+    outlook: challengeOutlook(s),
+    special: s.special
+      ? {
+          holding: s.special.held.map((h) => h !== null),
+          mine: you !== null ? (s.special.held[you] ?? null) : null,
+          used: [...s.special.used],
+          banned: s.special.banned,
+          passing: s.special.passing
+            ? { dir: s.special.passing.dir, picked: s.special.passing.picks.map((x) => x !== null), myPick: you !== null ? s.special.passing.picks[you] ?? null : null }
+            : null,
+        }
+      : null,
   };
 }

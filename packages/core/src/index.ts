@@ -6,3 +6,7 @@ export * from './game.ts';
 export * from './view.ts';
 export * from './match.ts';
 export * from './advisor.ts';
+export * from './replay.ts';
+export * from './outlook.ts';
+export * from './stats.ts';
+export * from './special.ts';

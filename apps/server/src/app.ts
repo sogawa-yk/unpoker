@@ -8,6 +8,7 @@ import { DEFAULT_TIMING, type RoomDeps, type Timing } from './room.ts';
 import { heartbeat, Rooms, ROOM_TTL_MS } from './rooms.ts';
 import { cryptoRng } from './ids.ts';
 import { MemoryStore, type RoomStore } from './store.ts';
+import { Recorder, type RecordStore } from './records.ts';
 
 const TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -31,6 +32,8 @@ export interface AppOptions {
   webRoot?: string | null;
   log?: RoomDeps['log'];
   explainer?: RoomDeps['explainer'];
+  /** 対局の記録（分析用）。無ければ記録しない */
+  records?: RecordStore;
 }
 
 export async function createApp(opts: AppOptions = {}) {
@@ -41,6 +44,7 @@ export async function createApp(opts: AppOptions = {}) {
     now: () => Date.now(),
     log: opts.log,
     explainer: opts.explainer,
+    recorder: opts.records ? new Recorder(opts.records, opts.log) : undefined,
   };
   const rooms = new Rooms(deps);
   await rooms.load();
@@ -67,6 +71,7 @@ export async function createApp(opts: AppOptions = {}) {
       await new Promise<void>((r) => server.close(() => r()));
       await rooms.flushAll();
       rooms.disposeAll();
+      await deps.recorder?.flush();
     },
   };
 }

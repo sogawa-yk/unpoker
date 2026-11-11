@@ -4,10 +4,12 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { handName, type Card as CardT, type GameView, type SeatView } from '@unpoker/core';
 import { Card } from '../components/Card.tsx';
 import { Chips, ConnBadge, Gauge, signed, Toast } from '../components/bits.tsx';
-import { provisionalRank, revealOdds, type HandOdds } from '../game.ts';
+import { carryNext, potNow, provisionalRank, revealOdds, type HandOdds } from '../game.ts';
+import { OutlookGroups, outlookStage, SlotOdds } from '../components/Outlook.tsx';
+import { SpecialDealShow, SpecialUsedBanner } from '../components/Special.tsx';
 import { useRoom, type Room, type RoomView } from '../net.ts';
 import { RuleSettings, useJoinQr } from '../components/RoomSettings.tsx';
-import { Board, PauseButton, SoundButton, stampDelay, useSwapAnimation, useTableSounds } from '../components/TableBits.tsx';
+import { Board, PauseButton, SoundButton, stampDelay, useChallengeBanner, useSwapAnimation, useTableSounds } from '../components/TableBits.tsx';
 import { sfx } from '../sound.ts';
 import './table.css';
 
@@ -30,9 +32,11 @@ export function TableScreen({ roomId, navigate }: { roomId: string | null; navig
       ) : s.status === 'lobby' ? (
         <Lobby room={room} s={s} />
       ) : s.status === 'finished' ? (
-        <Finished s={s} navigate={navigate} />
+        <Finished room={room} s={s} navigate={navigate} />
       ) : s.game ? (
         <TableGame room={room} s={s} g={s.game} />
+      ) : s.buying ? (
+        <TableBuying room={room} s={s} />
       ) : s.betting ? (
         <TableBetting room={room} s={s} />
       ) : null}
@@ -88,7 +92,7 @@ function Lobby({ room, s }: { room: Room; s: RoomView }) {
         </p>
       </section>
       <section className="lobby-side">
-        <h2 className="lobby-h">卓につく人</h2>
+        <h2 className="lobby-h">卓につく人{s.matchNo > 1 && <span className="muted small">（{s.matchNo} 対局目）</span>}</h2>
         <ul className="lobby-players">
           {[0, 1, 2, 3].map((i) => {
             const p = s.players[i];
@@ -119,6 +123,7 @@ function Lobby({ room, s }: { room: Room; s: RoomView }) {
 // ---------------------------------------------------------------- 対局
 
 const SIDES: Record<number, ('bottom' | 'left' | 'top' | 'right')[]> = {
+  2: ['bottom', 'top'],
   3: ['bottom', 'left', 'right'],
   4: ['bottom', 'left', 'top', 'right'],
 };
@@ -127,7 +132,8 @@ function TableGame({ room, s, g }: { room: Room; s: RoomView; g: GameView }) {
   const names = g.seats.map((sv) => s.players.find((p) => p.id === sv.id)?.name ?? '？');
   const sides = SIDES[g.seats.length] ?? SIDES[4]!;
   const swapDone = useSwapAnimation(g, s.gameNo);
-  const nextCarry = g.seats.reduce((a, x) => a + x.peekFee, 0);
+  const nextCarry = carryNext(g);
+  const stage = outlookStage(g, swapDone);
   useTableSounds(s, g);
   // 公開フェーズの見込み: テーブルに見えている札（場札とめくれた札）だけから計算する
   const visibleKey = g.phase === 'reveal' ? JSON.stringify([g.board, g.seats.map((x) => x.cards)]) : '';
@@ -147,13 +153,16 @@ function TableGame({ room, s, g }: { room: Room; s: RoomView; g: GameView }) {
         <span className={rotatingBet(s) ? 'bet-now' : undefined}>
           ベット <Chips n={g.bet} />
         </span>
+        <span className="pot" title="全員の基本ベットとチャレンジの参加費。このゲームの勝者が受け取る">
+          現在のポット <Chips n={potNow(g)} />
+        </span>
         {g.carryIn > 0 && (
           <span className="carry" title="このゲームの勝者が受け取る">
             持ち越しポット <Chips n={g.carryIn} />
           </span>
         )}
         {nextCarry > 0 && (
-          <span className="carry next" title="追加めくりの料金。次のゲームの勝者が受け取る">
+          <span className="carry next" title="追加めくりと AI 相談の料金。次のゲームの勝者が受け取る">
             次へ <Chips n={nextCarry} />
           </span>
         )}
@@ -168,7 +177,10 @@ function TableGame({ room, s, g }: { room: Room; s: RoomView; g: GameView }) {
         ))}
         <div className="center">
           <Banner g={g} names={names} />
-          <Board g={g} swap={swapDone} />
+          <Board g={g} swap={swapDone} width={stage ? 76 : undefined} under={stage === 'before' && g.outlook ? (k) => <SlotOdds o={g.outlook!} k={k} name={(i) => names[i]!} /> : undefined} />
+          {(stage === 'after' || stage === 'answer') && g.outlook && (
+            <OutlookGroups o={g.outlook} name={(i) => names[i]!} added={g.challenge?.swap?.added ?? null} stage={stage} />
+          )}
           <div className="center-gauge">
             <Gauge room={room} />
           </div>
@@ -187,6 +199,13 @@ function TableGame({ room, s, g }: { room: Room; s: RoomView; g: GameView }) {
       <NutOverlay g={g} />
       <ChallengeBanner g={g} s={s} names={names} />
       <ChallengeIntro g={g} names={names} show={g.phase === 'swap' && swapDone.intro} />
+      <SpecialUsedBanner g={g} names={names} />
+      {s.gameNo === 1 && <SpecialDealShow s={s} overlay />}
+      {g.special?.passing && (
+        <div className="sp-passing-note banner">
+          {g.special.passing.dir === 1 ? '右' : '左'}隣へ札を 1 枚渡します（{g.special.passing.picked.filter(Boolean).length} / {g.seats.length} 人が選択）
+        </div>
+      )}
       <BetAnnounce s={s} g={g} names={names} />
     </div>
   );
@@ -195,6 +214,35 @@ function TableGame({ room, s, g }: { room: Room; s: RoomView; g: GameView }) {
 const rotatingBet = (s: RoomView) => s.config.betMode === 'rotating';
 
 /** 持ち回り方式: 親がベット額を選んでいる間のテーブル */
+/** 対局の最初: 各自がスマホで前払いクレジットを買っている（B-11） */
+function TableBuying({ room, s }: { room: Room; s: RoomView }) {
+  const b = s.buying!;
+  return (
+    <div className="game">
+      <div className="game-ctrl">
+        {s.config.timeLimit !== false && <PauseButton room={room} s={s} />}
+        <SoundButton />
+      </div>
+      <div className="betting">
+        <p className="betting-title">前払いクレジットを買っています</p>
+        <p className="muted">追加でめくる・AI 相談の料金は、この対局ではクレジットから払います</p>
+        <SpecialDealShow s={s} />
+        <ul className="buy-list">
+          {s.players.map((p) => (
+            <li key={p.id} className={b.done.includes(p.id) ? 'done' : ''}>
+              <span>{p.name}</span>
+              <span>{b.done.includes(p.id) ? `${(p.credit ?? 0).toLocaleString()}` : '考え中…'}</span>
+            </li>
+          ))}
+        </ul>
+        <div className="center-gauge">
+          <Gauge room={room} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TableBetting({ room, s }: { room: Room; s: RoomView }) {
   const b = s.betting!;
   const name = s.players.find((p) => p.id === b.dealerId)?.name ?? '？';
@@ -315,15 +363,7 @@ function Banner({ g, names }: { g: GameView; names: string[] }) {
 
 /** 宣言の瞬間（便乗を待つ間）: 「挑戦」の印を大きく押す */
 function ChallengeBanner({ g, s, names }: { g: GameView; s: RoomView; names: string[] }) {
-  const [shown, setShown] = useState(false);
-  const seen = useRef<number | null>(null);
-  useEffect(() => {
-    if (g.phase !== 'join' || !g.challenge || seen.current === s.gameNo) return;
-    seen.current = s.gameNo;
-    setShown(true);
-    const t = setTimeout(() => setShown(false), 2600);
-    return () => clearTimeout(t);
-  }, [g.phase, s.gameNo]); // eslint-disable-line react-hooks/exhaustive-deps
+  const shown = useChallengeBanner(g, s.gameNo);
   const ch = g.challenge;
   return (
     <AnimatePresence>
@@ -428,6 +468,9 @@ function SeatPanel({ g, seat, sv, name, side, swapDone, odds }: { g: GameView; s
     <div className={`seat side-${side}${spotlight ? ' spot' : ''}${out ? ' out' : ''}${winner ? ' winner' : ''}`}>
       <div className="seat-head">
         <span className="seat-name">{name}</span>
+        {g.special?.holding[seat] && (
+          <span className="sp-badge" title="特殊効果カードを持っている（種類は伏せる）" aria-label="特殊効果カードあり" />
+        )}
         {g.dealer === seat && <span className="dealer" aria-label="親">親</span>}
         <Chips n={res ? res.stacks[seat]! : sv.stack} />
         {tags.map((t) => (
@@ -441,7 +484,7 @@ function SeatPanel({ g, seat, sv, name, side, swapDone, odds }: { g: GameView; s
           sv.sets.map((pair, si) => (
             <div key={si} className={`pair${bestSetIdx === si && score !== undefined ? ' best' : ''}`}>
               {pair.map((k) => (
-                <Card key={k} card={sv.cards[k] ?? null} faceUp={sv.cards[k] !== null} width={SEAT_CARD} win={!!winner && bestSetIdx === si} />
+                <Card key={k} card={sv.cards[k] ?? null} faceUp={sv.cards[k] !== null} width={sv.cards.length > 9 ? SEAT_CARD - 16 : sv.cards.length > 7 ? SEAT_CARD - 8 : SEAT_CARD} win={!!winner && bestSetIdx === si} />
               ))}
             </div>
           ))
@@ -449,7 +492,7 @@ function SeatPanel({ g, seat, sv, name, side, swapDone, odds }: { g: GameView; s
           <div className="pair loose">
             {Array.from({ length: 7 }, (_, k) => (
               <motion.div key={k} animate={{ y: k < sv.peekedCount ? -6 : 0, opacity: sv.placed && k === 0 ? 0.25 : 1 }}>
-                <Card card={null} faceUp={false} width={SEAT_CARD - 10} />
+                <Card card={null} faceUp={false} width={sv.cards.length > 7 ? SEAT_CARD - 18 : SEAT_CARD - 10} />
               </motion.div>
             ))}
           </div>
@@ -506,7 +549,7 @@ function NutOverlay({ g }: { g: GameView }) {
 
 // ---------------------------------------------------------------- 終了
 
-function Finished({ s, navigate }: { s: RoomView; navigate: (p: string) => void }) {
+function Finished({ room, s, navigate }: { room: Room; s: RoomView; navigate: (p: string) => void }) {
   const ranked = useMemo(() => (s.ranking ?? []).map((id) => s.players.find((p) => p.id === id)!).filter(Boolean), [s]);
   return (
     <div className="finished">
@@ -532,9 +575,15 @@ function Finished({ s, navigate }: { s: RoomView; navigate: (p: string) => void 
           ）
         </p>
       )}
-      <button className="btn" onClick={() => navigate('/table')}>
-        新しい対局を始める
-      </button>
+      <div className="finished-actions">
+        <button className="btn btn-shu" onClick={() => room.send({ t: 'rematch' })}>
+          同じメンバーで次の対局
+        </button>
+        <button className="btn btn-ghost" onClick={() => navigate('/table')}>
+          新しいテーブルを作る
+        </button>
+      </div>
+      <p className="muted small">同じメンバーなら、持ち点を戻して続けます。前の対局の成績は次の対局に引き継がれます</p>
     </div>
   );
 }

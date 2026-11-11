@@ -7,7 +7,7 @@ import { RULES, analyzeGame, decide } from './challenge.mjs';
 
 const N = Number(process.argv[2] ?? 40000);
 const seed = Number(process.argv[3] ?? 7);
-for (const n of [3, 4]) {
+for (const n of (process.env.PLAYERS ?? '2,3,4').split(',').map(Number)) {
   setSeed(seed);
   const acc = CATEGORY.map(() => ({ c: 0, first: 0, win: 0, keep: 0, keepN: 0 }));
   for (let t = 0; t < N; t++) {

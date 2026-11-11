@@ -81,11 +81,18 @@ export const bestOf = (sets, board) => {
   return best;
 };
 
+/**
+ * 配置の前に場に置く札の枚数（表の札 ＋ 伏せたランダムの札）。rules.md B-8（2026-11-10）は どの人数でも 5 − 人数。
+ * BOARD=old で、それより前の構成（3 人は表 2 枚、4 人は表 1 枚）に戻して比べられる。
+ * ここのシミュレーションの戦略は場札を見ずに場に出す札を選ぶので、表か伏せかの違いは結果に出ない
+ */
+export const preBoardCount = (n) => (process.env.BOARD === 'old' ? (n === 3 ? 2 : 1) : 5 - n);
+
 export function deal(n, strategies) {
   const deck = shuffle([...Array(52).keys()]);
   const hands = [];
   for (let i = 0; i < n; i++) hands.push(deck.splice(0, 7));
-  const board = deck.splice(0, n === 3 ? 2 : 1);
+  const board = deck.splice(0, preBoardCount(n));
   const players = hands.map((h, i) => {
     const st = STRATS[strategies[i]];
     const peeked = h.slice(0, 3); // 7 枚は裏向きでランダムなので先頭 3 枚を「めくった」とみなす

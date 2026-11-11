@@ -30,6 +30,25 @@ resource "oci_nosql_table" "rooms" {
   }
 }
 
+# 対局の記録（分析用。architecture.md「追加: 対局の記録」）。TTL なしで残す
+resource "oci_nosql_table" "records" {
+  for_each = {
+    players     = "CREATE TABLE ${var.name}_players (deviceId STRING, data JSON, PRIMARY KEY(deviceId))"
+    matches     = "CREATE TABLE ${var.name}_matches (matchId STRING, data JSON, PRIMARY KEY(matchId))"
+    games       = "CREATE TABLE ${var.name}_games (matchId STRING, gameNo INTEGER, data JSON, PRIMARY KEY(SHARD(matchId), gameNo))"
+    game_events = "CREATE TABLE ${var.name}_game_events (matchId STRING, eventNo INTEGER, data JSON, PRIMARY KEY(SHARD(matchId), eventNo))"
+  }
+  compartment_id = var.compartment_ocid
+  name           = "${var.name}_${each.key}"
+  ddl_statement  = each.value
+  table_limits {
+    capacity_mode      = "ON_DEMAND"
+    max_storage_in_gbs = 1
+    max_read_units     = 0
+    max_write_units    = 0
+  }
+}
+
 # アプリ本体。OCIR からの pull と NoSQL への読み書きは、リソース・プリンシパル（既存の動的グループ）で行う
 resource "oci_container_instances_container_instance" "app" {
   compartment_id           = var.compartment_ocid
@@ -51,6 +70,10 @@ resource "oci_container_instances_container_instance" "app" {
       NOSQL_REGION      = var.region
       NOSQL_COMPARTMENT = var.compartment_ocid
       NOSQL_AUTH        = "resource_principal"
+      # 対局の記録（テーブル名の頭。<prefix>_players など）
+      RECORDS              = "nosql"
+      NOSQL_RECORDS_PREFIX = var.name
+      APP_VERSION          = var.image_tag
       # AI 相談の説明文（OCI Generative AI。リージョンとコンパートメントは NOSQL_* と同じ）
       GENAI       = var.genai_model == "" ? "off" : "on"
       GENAI_MODEL = var.genai_model
@@ -62,5 +85,5 @@ resource "oci_container_instances_container_instance" "app" {
     private_ip            = var.app_private_ip
     is_public_ip_assigned = false
   }
-  depends_on = [oci_artifacts_container_repository.server]
+  depends_on = [oci_artifacts_container_repository.server, oci_nosql_table.records]
 }

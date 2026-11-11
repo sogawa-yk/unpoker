@@ -1,13 +1,22 @@
 // 端末とサーバーの間のメッセージ（JSON）。受け取るメッセージは zod で形を検査する
 import { z } from 'zod';
-import type { GameView, MatchConfig, GameRecord } from '@unpoker/core';
+import type { GameView, MatchConfig, GameRecord, SpecialKind } from '@unpoker/core';
 
 const pair = z.tuple([z.number().int(), z.number().int()]);
 
 export const GameActionMsg = z.discriminatedUnion('type', [
   z.object({ type: z.literal('peek'), index: z.number().int() }),
   z.object({ type: z.literal('place'), index: z.number().int() }),
-  z.object({ type: z.literal('arrange'), sets: z.array(pair).length(3) }),
+  z.object({ type: z.literal('arrange'), sets: z.array(pair).min(2).max(5) }),
+  /** 特殊効果カードを使う（B-10） */
+  z.object({
+    type: z.literal('special'),
+    kind: z.enum(['extraSet', 'reroll', 'freeChallenge', 'anyChallenge', 'nut4x', 'suitReroll', 'ban', 'passRight', 'passLeft', 'surge']),
+    index: z.number().int().optional(),
+    suit: z.number().int().optional(),
+  }),
+  /** 札を渡すとき、渡す札を選ぶ */
+  z.object({ type: z.literal('pass'), index: z.number().int() }),
   z.object({ type: z.literal('flip'), index: z.number().int() }),
   z.object({ type: z.literal('declare'), yes: z.boolean() }),
   z.object({ type: z.literal('join'), yes: z.boolean() }),
@@ -27,18 +36,23 @@ export const ConfigMsg = z.object({
   maxBet: z.number().int().nullable().optional(),
   betStep: z.number().int().optional(),
   timeLimit: z.boolean().optional(),
+  headsUp: z.boolean().optional(),
+  prepaid: z.boolean().optional(),
+  specialCards: z.boolean().optional(),
 });
 
 const roomId = z.string().regex(/^[A-Z2-9]{6}$/);
 const token = z.string().min(20).max(100);
+/** 端末に保存したプレイヤー ID（記録用。古い端末は送らない） */
+const deviceId = z.string().regex(/^[A-Za-z0-9-]{8,64}$/).optional();
 
 export const ClientMsg = z.discriminatedUnion('t', [
   /** テーブル（iPad）がルームを作る */
   z.object({ t: z.literal('createRoom') }),
   /** スマホがルームを作って、そのまま親機として参加する（テーブルなしで遊ぶ） */
-  z.object({ t: z.literal('hostRoom'), name: z.string().trim().min(1).max(12) }),
+  z.object({ t: z.literal('hostRoom'), name: z.string().trim().min(1).max(12), deviceId }),
   /** スマホがルームに参加する */
-  z.object({ t: z.literal('join'), roomId, name: z.string().trim().min(1).max(12) }),
+  z.object({ t: z.literal('join'), roomId, name: z.string().trim().min(1).max(12), deviceId }),
   /** 再接続（テーブルもスマホも） */
   z.object({ t: z.literal('resume'), roomId, token }),
   /** ルーム設定の変更（テーブルか親機、待機中のみ） */
@@ -47,10 +61,16 @@ export const ClientMsg = z.discriminatedUnion('t', [
   z.object({ t: z.literal('kick'), playerId: z.string() }),
   /** 対局開始（テーブルか親機） */
   z.object({ t: z.literal('start') }),
+  /** 対局が終わった後、同じメンバーで次の対局へ（テーブルか親機） */
+  z.object({ t: z.literal('rematch') }),
   /** 結果確認の後、次のゲームへ（テーブルか親機） */
   z.object({ t: z.literal('nextGame') }),
   /** 持ち時間を止める・再開する（テーブルか親機、対局中） */
   z.object({ t: z.literal('pause'), paused: z.boolean() }),
+  /** 対局の最初に、前払いクレジットを買う（スマホ。units はベット額の何倍か） */
+  z.object({ t: z.literal('buy'), units: z.number().int().min(0).max(10) }),
+  /** 持っている特殊効果カードと新しいカードのどちらを持つか（take なら新しいほう） */
+  z.object({ t: z.literal('specialPick'), take: z.boolean() }),
   /** 持ち回り方式で、親がベット額を決める（スマホ） */
   z.object({ t: z.literal('bet'), amount: z.number().int() }),
   /** ゲーム中の操作（スマホ） */
@@ -68,6 +88,8 @@ export interface PlayerView {
   chips: number;
   /** 今のゲームでの席番号（参加していなければ null） */
   seat: number | null;
+  /** 前払いクレジットの残り（前払い制でなければ null。B-11） */
+  credit: number | null;
 }
 
 export interface RoomView {
@@ -80,6 +102,8 @@ export interface RoomView {
   hostId: string | null;
   you: { role: 'table' } | { role: 'player'; playerId: string };
   gameNo: number;
+  /** このルームで何番目の対局か（待機中は、これから始める対局の番号） */
+  matchNo: number;
   dealerId: string | null;
   history: GameRecord[];
   ranking: string[] | null;
@@ -94,6 +118,17 @@ export interface RoomView {
   refund: Record<string, number> | null;
   /** 持ち回り方式で、親がベット額を選んでいる間（配る前。game は null） */
   betting: { dealerId: string; options: number[] } | null;
+  /** 前払い制で、対局の最初にクレジットを買っている間（買い終えた人の ID と、1 単位の額） */
+  buying: { done: string[]; unit: number } | null;
+  /** 特殊効果カード（B-10。使わない対局では null）。自分のカードと提案は本人だけ、配った相手は全員に公開 */
+  special: {
+    mine: SpecialKind | null;
+    holders: string[];
+    deals: { recipient: string; candidates: string[] }[];
+    offer: { current: SpecialKind; offered: SpecialKind } | null;
+    /** 前のゲームで「今 2 組増やす」を使ったので、次のゲームは 2 組になる人 */
+    shrinkNext: string[];
+  } | null;
   /** テーブルが持ち時間を止めている */
   paused: boolean;
   /** 止めている間の操作待ちの残り（ミリ秒）。操作待ちでなければ null */

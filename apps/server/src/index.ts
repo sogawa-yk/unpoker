@@ -5,6 +5,9 @@
 //   STORE_DIR     … STORE=file のときの保存先（既定 .data/rooms）
 //   NOSQL_TABLE / NOSQL_REGION / NOSQL_COMPARTMENT … STORE=nosql のとき
 //   NOSQL_AUTH    … resource_principal（既定。Container Instances 上）| config（手元。OCI_PROFILE のプロファイル）
+//   RECORDS       … memory | file | nosql | off（対局の記録。既定は STORE と同じ種類、memory なら off）
+//   RECORDS_DIR   … RECORDS=file のときの保存先（既定 .data/records）。NOSQL_RECORDS_PREFIX … RECORDS=nosql のテーブル名の頭（既定 unpoker）
+//   APP_VERSION   … 記録に残すコードの版（ビルド時のコミット）
 //   GENAI         … on で AI 相談に説明文を付ける（OCI Generative AI）。GENAI_MODEL / GENAI_REGION / GENAI_COMPARTMENT / GENAI_AUTH
 //                   リージョンとコンパートメントの既定は NOSQL_* と同じ、認証の既定は resource_principal
 import { existsSync } from 'node:fs';
@@ -12,6 +15,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createApp } from './app.ts';
 import { FileStore, MemoryStore, NoSqlStore, type RoomStore } from './store.ts';
+import { FileRecordStore, NoSqlRecordStore, type RecordStore } from './records.ts';
 import { OciExplainer } from './explain.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -32,6 +36,21 @@ const store: RoomStore =
         })
       : new MemoryStore();
 
+const recordsKind = process.env.RECORDS ?? (process.env.STORE === 'memory' || !process.env.STORE ? 'off' : process.env.STORE);
+const records: RecordStore | undefined =
+  recordsKind === 'file'
+    ? new FileRecordStore(process.env.RECORDS_DIR ?? '.data/records')
+    : recordsKind === 'nosql'
+      ? new NoSqlRecordStore({
+          prefix: process.env.NOSQL_RECORDS_PREFIX ?? 'unpoker',
+          table: '',
+          region: env('NOSQL_REGION'),
+          compartment: env('NOSQL_COMPARTMENT'),
+          auth: process.env.NOSQL_AUTH === 'config' ? 'config' : 'resource_principal',
+          profile: process.env.OCI_PROFILE,
+        })
+      : undefined;
+
 const log = (msg: string, extra: Record<string, unknown> = {}) =>
   console.log(JSON.stringify({ time: new Date().toISOString(), msg, ...extra }));
 
@@ -46,8 +65,8 @@ const explainer =
       })
     : undefined;
 
-const app = await createApp({ store, webRoot, log, explainer });
-app.server.listen(port, () => log('listening', { port, webRoot, store: process.env.STORE ?? 'memory', genai: explainer ? 'on' : 'off' }));
+const app = await createApp({ store, webRoot, log, explainer, records });
+app.server.listen(port, () => log('listening', { port, webRoot, store: process.env.STORE ?? 'memory', records: records ? recordsKind : 'off', genai: explainer ? 'on' : 'off' }));
 
 const shutdown = async (signal: string) => {
   log('shutting down', { signal });

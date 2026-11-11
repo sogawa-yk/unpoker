@@ -57,6 +57,23 @@ export function forgetToken(roomId: string, role: Role) {
   }
 }
 
+/** 端末に保存するプレイヤー ID（記録で、ルームをまたいで同じ人を見分ける。ログインはしない） */
+export function deviceId(): string | undefined {
+  try {
+    let id = localStorage.getItem('unpoker:device');
+    if (!id) {
+      id = crypto.randomUUID();
+      localStorage.setItem('unpoker:device', id);
+    }
+    return id;
+  } catch {
+    return undefined;
+  }
+}
+
+/** 参加とルーム作成（親機）には、端末の ID を添える */
+const withDevice = (m: ClientMsg): ClientMsg => (m.t === 'join' || m.t === 'hostRoom' ? { ...m, deviceId: m.deviceId ?? deviceId() } : m);
+
 const wsUrl = () => `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
 
 export type ConnStatus = 'connecting' | 'open' | 'closed';
@@ -90,7 +107,7 @@ export function useRoom(roomId: string | null, role: Role, onOpen?: (send: (m: C
 
   const send = useCallback((m: ClientMsg) => {
     const ws = wsRef.current;
-    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(m));
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(withDevice(m)));
   }, []);
 
   useEffect(() => {
@@ -125,7 +142,7 @@ export function useRoom(roomId: string | null, role: Role, onOpen?: (send: (m: C
         const rid = roomRef.current;
         const token = rid ? savedToken(rid, role) : null;
         if (rid && token) ws.send(JSON.stringify({ t: 'resume', roomId: rid, token } satisfies ClientMsg));
-        else onOpenRef.current?.((m) => ws.send(JSON.stringify(m)));
+        else onOpenRef.current?.((m) => ws.send(JSON.stringify(withDevice(m))));
         // Cloudflare と LB のアイドルタイムアウトより短い間隔で ping
         pingTimer = setInterval(() => ws.readyState === WebSocket.OPEN && ws.send('{"t":"ping"}'), 25_000);
       };
