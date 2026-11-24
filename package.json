@@ -14,7 +14,8 @@
     "build": "npm run build -w @unpoker/web && npm run build -w @unpoker/server",
     "start": "node apps/server/dist/index.js",
     "e2e": "playwright test",
-    "bots": "tsx apps/server/scripts/bots.ts"
+    "bots": "tsx apps/server/scripts/bots.ts",
+    "nosql": "tsx apps/server/scripts/nosql-backup.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.55.1",
